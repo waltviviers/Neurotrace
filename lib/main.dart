@@ -8,199 +8,208 @@ void main() {
   runApp(GameWidget(game: NeuroTraceGame()));
 }
 
-class NeuroTraceGame extends FlameGame with TapCallbacks {
-  late ProgressBar progressBar;
-  late HealthBar healthBar;
+class NeuroTraceGame extends FlameGame with HasTappables {
+  late TextComponent statusText;
+  final Random _rand = Random();
 
-  final Random random = Random();
-  int health = 3;
-
-  bool waitingForTap = false;
   final List<int> memorySequence = [];
   final List<int> playerInput = [];
+  final List<GlyphButton> buttons = [];
+
+  bool showing = false;
+
+  @override
+  Color backgroundColor() => const Color(0xFF0A0A0F);
 
   @override
   Future<void> onLoad() async {
-    // UI bars
-    progressBar = ProgressBar(
-      position: Vector2(50, 40),
-      size: Vector2(260, 18),
-    );
-    healthBar = HealthBar(
-      position: Vector2(50, 70),
-      size: Vector2(260, 12),
-      health: health,
-    );
-    add(progressBar);
-    add(healthBar);
+    await super.onLoad();
 
-    // 4 buttons in a 2x2 grid
-    const double btnSize = 100;
+    // Fixed logical size so it looks consistent on the runner
+    camera.viewport = FixedResolutionViewport(Vector2(320, 480));
+
+    statusText = TextComponent(
+      text: 'Tap PLAY',
+      position: Vector2(10, 10),
+      anchor: Anchor.topLeft,
+      textRenderer: TextPaint(
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+        ),
+      ),
+    );
+    add(statusText);
+
+    // Create 4 buttons in a 2x2 grid
+    final positions = <Vector2>[
+      Vector2(60, 160),
+      Vector2(180, 160),
+      Vector2(60, 280),
+      Vector2(180, 280),
+    ];
+
     for (int i = 0; i < 4; i++) {
-      final x = 50 + (i % 2) * (btnSize + 20);
-      final y = 120 + (i ~/ 2) * (btnSize + 20);
-      add(GlyphButton(
-        index: i,
-        position: Vector2(x.toDouble(), y.toDouble()),
-        size: Vector2(btnSize, btnSize),
-        onPressed: () => checkMemoryInput(i),
-      ));
+      final btn = GlyphButton(
+        id: i,
+        position: positions[i],
+        size: Vector2(80, 80),
+        onPressed: onButtonPressed,
+      );
+      buttons.add(btn);
+      add(btn);
     }
 
-    await Future.delayed(const Duration(milliseconds: 300));
-    await showMemorySequence();
+    // PLAY button
+    add(PlayButton(
+      position: Vector2(160, 90),
+      onPressed: startRound,
+    ));
+  }
+
+  void startRound() {
+    if (showing) return;
+    playerInput.clear();
+    memorySequence.add(_rand.nextInt(4));
+    statusText.text = 'Memorize…';
+    showMemorySequence();
   }
 
   Future<void> showMemorySequence() async {
-    // Extend the sequence by one random glyph and “animate” the bar
-    memorySequence.add(random.nextInt(4));
-    waitingForTap = false;
-    playerInput.clear();
-
-    progressBar.setValue(0);
-    for (int i = 0; i < memorySequence.length; i++) {
-      progressBar.setValue((i + 1) / memorySequence.length);
-      await Future.delayed(const Duration(milliseconds: 400));
+    showing = true;
+    for (final id in memorySequence) {
+      await buttons[id].flash();
+      await Future.delayed(const Duration(milliseconds: 250));
     }
-
-    waitingForTap = true;
+    showing = false;
+    statusText.text = 'Your turn';
   }
 
-  void checkMemoryInput(int i) {
-    if (!waitingForTap) return;
+  void onButtonPressed(int id) {
+    if (showing || memorySequence.isEmpty) return;
 
-    playerInput.add(i);
-
-    // If wrong input: reduce health and restart showing sequence
+    playerInput.add(id);
     final idx = playerInput.length - 1;
+
     if (playerInput[idx] != memorySequence[idx]) {
-      health -= 1;
-      healthBar.setHealth(health);
-      waitingForTap = false;
-
-      if (health <= 0) {
-        // reset game
-        health = 3;
-        memorySequence.clear();
-        playerInput.clear();
-        healthBar.setHealth(health);
-      }
-
-      // show again (and add a new element if we reset)
-      Future.delayed(const Duration(milliseconds: 400), () async {
-        await showMemorySequence();
-      });
+      statusText.text =
+          'Wrong! Score: ${memorySequence.length - 1}  (tap PLAY)';
+      memorySequence.clear();
+      playerInput.clear();
       return;
     }
 
-    // If finished current sequence correctly, add a new step
     if (playerInput.length == memorySequence.length) {
-      waitingForTap = false;
-      Future.delayed(const Duration(milliseconds: 400), () async {
-        await showMemorySequence();
-      });
-    }
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-  }
-}
-
-/// ---------- Components (declared below for convenience) ----------
-
-class ProgressBar extends PositionComponent {
-  double _value = 0; // 0..1
-  final Paint _bg = Paint()..color = const Color(0xFF30343A);
-  final Paint _fg = Paint()..color = const Color(0xFF64B5F6);
-
-  ProgressBar({super.position, super.size});
-
-  void setValue(double v) {
-    _value = v.clamp(0, 1);
-  }
-
-  @override
-  void render(Canvas canvas) {
-    // background
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, size.x, size.y), const Radius.circular(6)),
-      _bg,
-    );
-    // foreground
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          Rect.fromLTWH(0, 0, size.x * _value, size.y), const Radius.circular(6)),
-      _fg,
-    );
-  }
-}
-
-class HealthBar extends PositionComponent {
-  int _health; // 0..3
-  final Paint _slot = Paint()..color = const Color(0xFFE0E0E0);
-  final Paint _full = Paint()..color = const Color(0xFFEF5350);
-
-  HealthBar({required int health, super.position, super.size}) : _health = health;
-
-  void setHealth(int h) {
-    _health = h.clamp(0, 3);
-  }
-
-  @override
-  void render(Canvas canvas) {
-    // 3 small segments
-    const gap = 4.0;
-    final segmentW = (size.x - gap * 2) / 3;
-    for (int i = 0; i < 3; i++) {
-      final rect = Rect.fromLTWH(i * (segmentW + gap), 0, segmentW, size.y);
-      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), _slot);
-      if (i < _health) {
-        canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), _full);
-      }
+      statusText.text = 'Great! Next round…';
+      Future.delayed(const Duration(milliseconds: 600), startRound);
     }
   }
 }
 
-class GlyphButton extends PositionComponent with TapCallbacks {
-  final int index;
+class GlyphButton extends PositionComponent
+    with TapCallbacks, HasGameRef<NeuroTraceGame> {
+  GlyphButton({
+    required this.id,
+    required Vector2 position,
+    required Vector2 size,
+    required this.onPressed,
+  }) {
+    this.position = position;
+    this.size = size;
+    anchor = Anchor.center;
+  }
+
+  final int id;
+  final void Function(int) onPressed;
+  bool _highlight = false;
+
+  @override
+  void render(Canvas canvas) {
+    final rect = Rect.fromLTWH(0, 0, size.x, size.y);
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(12));
+    final paint = Paint()
+      ..color = _highlight ? Colors.tealAccent : _colorFor(id);
+    canvas.drawRRect(rrect, paint);
+
+    // Label (A/B/C/D)
+    final label = ['A', 'B', 'C', 'D'][id];
+    final tp = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(
+      canvas,
+      Offset(size.x / 2 - tp.width / 2, size.y / 2 - tp.height / 2),
+    );
+  }
+
+  Color _colorFor(int i) {
+    switch (i) {
+      case 0:
+        return const Color(0xFF64FFDA);
+      case 1:
+        return const Color(0xFF7C4DFF);
+      case 2:
+        return const Color(0xFFFFD54F);
+      default:
+        return const Color(0xFFE57373);
+    }
+  }
+
+  Future<void> flash() async {
+    _highlight = true;
+    await Future.delayed(const Duration(milliseconds: 350));
+    _highlight = false;
+  }
+
+  @override
+  void onTapUp(TapUpEvent event) {
+    onPressed(id);
+  }
+}
+
+class PlayButton extends PositionComponent with TapCallbacks {
+  PlayButton({required Vector2 position, required this.onPressed}) {
+    this.position = position;
+    size = Vector2(120, 36);
+    anchor = Anchor.center;
+  }
+
   final VoidCallback onPressed;
 
-  GlyphButton({
-    required this.index,
-    required this.onPressed,
-    super.position,
-    super.size,
-  });
-
-  final Paint _bg = Paint()..color = const Color(0xFF424B57);
-  final Paint _outline = Paint()
-    ..color = const Color(0xFF90CAF9)
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 3;
-
-  final TextPaint _label = TextPaint(
-    style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w600),
-  );
-
   @override
   void render(Canvas canvas) {
-    final rrect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.x, size.y),
-      const Radius.circular(14),
-    );
-    canvas.drawRRect(rrect, _bg);
-    canvas.drawRRect(rrect, _outline);
+    final rect = Rect.fromLTWH(0, 0, size.x, size.y);
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(18));
+    final paint = Paint()..color = Colors.white;
+    canvas.drawRRect(rrect, paint);
 
-    final text = 'Glyph $index';
-    final tp = _label.toTextPainter(text);
-    tp.layout();
-    tp.paint(canvas, Offset((size.x - tp.width) / 2, (size.y - tp.height) / 2));
+    final tp = TextPainter(
+      text: const TextSpan(
+        text: 'PLAY',
+        style: TextStyle(
+          color: Colors.black,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(
+      canvas,
+      Offset(size.x / 2 - tp.width / 2, size.y / 2 - tp.height / 2),
+    );
   }
 
   @override
-  void onTapDown(TapDownEvent event) {
+  void onTapUp(TapUpEvent event) {
     onPressed();
   }
 }
