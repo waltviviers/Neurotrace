@@ -17,54 +17,56 @@ class NeuroTraceGame extends FlameGame with TapDetector {
   double sweetSpotEnd = 0.9;
   bool waitingForTap = false;
 
-  List<int> memorySequence = [];
-  List<int> playerInput = [];
-
-  Random random = Random();
+  final List<int> memorySequence = [];
+  final List<int> playerInput = [];
+  final Random random = Random();
   int health = 3;
 
   @override
   Future<void> onLoad() async {
-    progressBar = ProgressBar()
-      ..position = Vector2(50, size.y / 2)
-      ..size = Vector2(size.x - 100, 30);
+    await super.onLoad();
+
+    // UI
+    progressBar = ProgressBar();
     add(progressBar);
 
-    healthBar = HealthBar(health)
-      ..position = Vector2(50, size.y - 50)
-      ..size = Vector2(size.x - 100, 20);
-    add(healthBar);
-
     statusText = TextComponent(
-      text: "Hack Started...",
-      position: Vector2(50, 100),
-      textRenderer: TextPaint(
-        style: const TextStyle(color: Colors.green, fontSize: 18),
-      ),
+      text: 'Tap to begin',
+      position: Vector2(200, 50),
+      anchor: Anchor.topCenter,
+      priority: 10,
     );
     add(statusText);
 
-    addToMemory();
+    healthBar = HealthBar(position: Vector2(50, 100));
+    add(healthBar);
+
+    // 4 glyph buttons
+    for (int i = 0; i < 4; i++) {
+      add(GlyphButton(
+        index: i,
+        position: Vector2(60 + i * 80, 300),
+        onTap: () => checkMemoryInput(i),
+      ));
+    }
   }
 
-  void addToMemory() {
-    memorySequence.add(random.nextInt(4));
-    playerInput.clear();
-    statusText.text = "Memorize: ${memorySequence.join('-')}";
-    waitingForTap = false;
+  void startTimingPhase() {
     progressBar.reset();
+    waitingForTap = true;
+    statusText.text = 'Tap in the sweet spot!';
   }
 
-  @override
-  void update(double dt) {
-    super.update(dt);
-    if (!waitingForTap) {
-      progressBar.updateBar(dt);
-      if (progressBar.value >= 1.0) {
-        waitingForTap = true;
-        statusText.text = "Tap now!";
-        progressBar.reset();
-      }
-    } else {
-      progressBar.updateBar(dt);
-      if (progressBar.value
+  void startMemoryPhase() {
+    memorySequence.add(random.nextInt(4));
+    statusText.text = 'Memorize the sequence';
+    Future.delayed(const Duration(milliseconds: 800), showMemorySequence);
+  }
+
+  void showMemorySequence() {
+    for (int i = 0; i < memorySequence.length; i++) {
+      Future.delayed(Duration(milliseconds: i * 700), () {
+        statusText.text = 'Glyph: ${memorySequence[i]}';
+      });
+    }
+    Future.del
