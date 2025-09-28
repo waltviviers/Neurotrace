@@ -1,36 +1,38 @@
-import 'package:flame/components.dart';
-import 'package:flame/game.dart';
-import 'package:flame/input.dart';
+import 'package:flutter/material.dart';
 
-class NeuroTraceGame extends FlameGame with TapDetector {
-  late RectangleComponent progressBar;
-  late RectangleComponent healthBar;
+void main() => runApp(const NeuroTraceApp());
+
+class NeuroTraceApp extends StatelessWidget {
+  const NeuroTraceApp({super.key});
 
   @override
-  Future<void> onLoad() async {
-    super.onLoad();
-
-    // Simple progress bar
-    progressBar = RectangleComponent(
-      size: Vector2(200, 20),
-      paint: Paint()..color = const Color(0xFF00FF00),
-    )
-      ..position = Vector2(50, 50);
-    add(progressBar);
-
-    // Simple health bar
-    healthBar = RectangleComponent(
-      size: Vector2(200, 20),
-      paint: Paint()..color = const Color(0xFFFF0000),
-    )
-      ..position = Vector2(50, 100);
-    add(healthBar);
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'NeuroTrace',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(useMaterial3: true),
+      home: const _BuildOKScreen(),
+    );
   }
+}
+
+class _BuildOKScreen extends StatelessWidget {
+  const _BuildOKScreen({super.key});
 
   @override
-  void onTapDown(TapDownInfo info) {
-    // For now just shrink the progress bar when you tap
-    progressBar.size.x -= 10;
-    if (progressBar.size.x < 0) progressBar.size.x = 0;
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Text(
+          'NeuroTrace build OK',
+          style: TextStyle(
+            color: Colors.greenAccent.shade200,
+            fontSize: 24,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ),
+    );
   }
 }
