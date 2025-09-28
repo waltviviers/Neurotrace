@@ -24,26 +24,31 @@ jobs:
         with:
           channel: stable
 
-      - name: Create fresh Flutter project (Android only)
+      # Create a Flutter project in a subfolder to avoid the repo not-empty error
+      - name: Create Flutter project in ./app
         run: |
-          flutter create . --project-name neurotrace --org com.neurotrace.app --platforms=android
-          # ensure minSdk 21
-          sed -i 's/minSdkVersion [0-9][0-9]*/minSdkVersion 21/' android/app/build.gradle
+          flutter create app --project-name neurotrace --org com.neurotrace.app --platforms=android
+          sed -i 's/minSdkVersion [0-9][0-9]*/minSdkVersion 21/' app/android/app/build.gradle
 
       - name: Add Flame dependency
+        working-directory: app
         run: flutter pub add flame
 
       - name: Replace main.dart with your game file
-        run: mv game_main.dart lib/main.dart
+        run: |
+          test -f game_main.dart || (echo "Missing game_main.dart at repo root" && exit 1)
+          cp game_main.dart app/lib/main.dart
 
       - name: Fetch packages
+        working-directory: app
         run: flutter pub get
 
       - name: Build APK (debug)
+        working-directory: app
         run: flutter build apk --debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: neurotrace-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
