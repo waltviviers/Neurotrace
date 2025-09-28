@@ -1,0 +1,17 @@
+name: neurotrace
+description: A cyberpunk memory-tap game prototype
+publish_to: 'none' # we’re not publishing to pub.dev
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flame: ^1.8.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
