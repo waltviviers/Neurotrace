@@ -1,0 +1,51 @@
+name: Build NeuroTrace APK (Debug)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Create Flutter project skeleton
+        run: |
+          flutter create . --project-name neurotrace --org com.neurotrace.app --platforms=android
+          # Ensure Android minSdk 21 (Flame is fine with 21+)
+          sed -i 's/minSdkVersion [0-9][0-9]*/minSdkVersion 21/' android/app/build.gradle
+
+      - name: Add Flame dependency
+        run: flutter pub add flame
+
+      - name: Replace main.dart with our game
+        run: |
+          mv game_main.dart lib/main.dart
+          echo "Replaced lib/main.dart"
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build APK (debug)
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurotrace-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
