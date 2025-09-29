@@ -1,67 +1,73 @@
-name: Build Android APKs
+name: Build NeuroTrace APK (Debug)
 
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - "README.md"
+      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
 
+    env:
+      FLUTTER_CHANNEL: stable
+      JAVA_VERSION: "17"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      # ---- Java & Flutter ----------------------------------------------------
+      - name: Setup Java (JDK ${{ env.JAVA_VERSION }})
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Flutter
+      - name: Setup Flutter (${{ env.FLUTTER_CHANNEL }})
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.x'
-          channel: 'stable'
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      - name: Install dependencies
+      # ---- Caches ------------------------------------------------------------
+      - name: Pub cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ---- Get deps & sanity checks -----------------------------------------
+      - name: Flutter pub get
         run: flutter pub get
 
-      - name: Generate launcher icons
-        run: flutter pub run flutter_launcher_icons:main
+      # Optional, uncomment if you want static analysis to fail the build
+      # - name: Flutter analyze
+      #   run: flutter analyze
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
-      # ---------------- AUTO-BUMP VERSION ----------------
-      - name: Bump build number
-        id: bump
-        run: |
-          CURRENT=$(grep '^version:' pubspec.yaml | sed 's/version: //')
-          VERSION_NAME=$(echo $CURRENT | cut -d+ -f1)
-          BUILD_NUMBER=$(echo $CURRENT | cut -d+ -f2)
-          NEW_BUILD=$((BUILD_NUMBER+1))
-          echo "📦 New version: $VERSION_NAME+$NEW_BUILD"
-          sed -i "s/^version: .*/version: $VERSION_NAME+$NEW_BUILD/" pubspec.yaml
-
-      # ---------------- DEBUG BUILD ----------------
-      - name: Build Debug APK
+      # ---- Build APK ---------------------------------------------------------
+      - name: Build APK (debug)
         run: flutter build apk --debug
 
-      - name: Upload Debug APK
+      # ---- Upload artifact ---------------------------------------------------
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neurotrace-debug-apk
+          name: neurotrace-debug-${{ github.sha }}
           path: build/app/outputs/flutter-apk/app-debug.apk
-
-      # ---------------- RELEASE BUILD ----------------
-      - name: Build Release APK
-        run: flutter build apk --release
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: neurotrace-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
