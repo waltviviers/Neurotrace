@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // ✅ Lock orientation to portrait
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -58,6 +57,88 @@ class NeuroTheme {
   );
 }
 
+/// ---------------------- PARALLAX BACKGROUND ----------------------
+class NeuroBg extends StatefulWidget {
+  const NeuroBg({super.key, this.trigger});
+  /// Increment this notifier to make the background drift & ease back.
+  final ValueNotifier<int>? trigger;
+
+  @override
+  State<NeuroBg> createState() => _NeuroBgState();
+}
+
+class _NeuroBgState extends State<NeuroBg> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<Offset> _anim;
+  final Random _rng = Random();
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300));
+    _anim = Tween<Offset>(begin: Offset.zero, end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+
+    widget.trigger?.addListener(_nudge);
+  }
+
+  void _nudge() {
+    final dx = (_rng.nextDouble() - 0.5) * 24; // pixels to drift
+    final dy = (_rng.nextDouble() - 0.5) * 24;
+    _anim = Tween<Offset>(begin: Offset(dx, dy), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _ctrl
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  void dispose() {
+    widget.trigger?.removeListener(_nudge);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) {
+        return Stack(children: [
+          Positioned.fill(
+            child: Transform.translate(
+              offset: _anim.value,
+              child: Image.asset(
+                'assets/bg_circuit.png',
+                fit: BoxFit.cover,
+                color: Colors.black.withOpacity(0.55),
+                colorBlendMode: BlendMode.darken,
+              ),
+            ),
+          ),
+          // Soft vertical vignette
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.14),
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.22),
+                  ],
+                  stops: const [0.0, 0.5, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ]);
+      },
+    );
+  }
+}
+
 /// ---------------------- APP ----------------------
 class NeuroTraceApp extends StatelessWidget {
   const NeuroTraceApp({super.key});
@@ -73,7 +154,7 @@ class NeuroTraceApp extends StatelessWidget {
   }
 }
 
-/// ---------------------- SPLASH (glitch) ----------------------
+/// ---------------------- SPLASH (with parallax) ----------------------
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -81,31 +162,57 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+    with TickerProviderStateMixin {
+  late final AnimationController _scaleCtrl;
   late final Animation<double> _scale;
   late final Timer _navTimer;
+
+  // Background parallax trigger: gently pulse + a couple of stronger nudges
+  final ValueNotifier<int> _bgTrigger = ValueNotifier<int>(0);
+  late final AnimationController _pulseCtrl;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+    _scaleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 950),
+    );
     _scale = Tween(begin: 0.92, end: 1.0)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-    _ctrl.forward();
+        .animate(CurvedAnimation(parent: _scaleCtrl, curve: Curves.easeOutCubic));
+    _scaleCtrl.forward();
+
+    // Subtle repeating pulse to the background
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..addStatusListener((s) {
+        if (s == AnimationStatus.completed) {
+          _bgTrigger.value++; // nudge
+          _pulseCtrl.reverse();
+        } else if (s == AnimationStatus.dismissed) {
+          _pulseCtrl.forward();
+        }
+      });
+    _pulseCtrl.forward();
 
     _navTimer = Timer(const Duration(milliseconds: 1900), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const GameScreen()),
-        );
-      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const GameScreen()),
+      );
     });
+
+    // A couple of extra nudges for a lively first impression
+    Future.delayed(const Duration(milliseconds: 300), () => _bgTrigger.value++);
+    Future.delayed(const Duration(milliseconds: 900), () => _bgTrigger.value++);
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _scaleCtrl.dispose();
+    _pulseCtrl.dispose();
     _navTimer.cancel();
     super.dispose();
   }
@@ -113,11 +220,10 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
-
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: CustomPaint(painter: _ScanlinePainter())),
+          NeuroBg(trigger: _bgTrigger),
           Center(
             child: ScaleTransition(
               scale: _scale,
@@ -135,16 +241,7 @@ class _SplashScreenState extends State<SplashScreen>
                     padding: const EdgeInsets.all(14),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.asset(
-                        'assets/logo.png',
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: NeuroTheme.bg,
-                          child: const Center(
-                            child: Icon(Icons.bolt, color: Colors.white54, size: 60),
-                          ),
-                        ),
-                      ),
+                      child: Image.asset('assets/logo.png', fit: BoxFit.cover),
                     ),
                   ),
                   const SizedBox(height: 22),
@@ -159,12 +256,6 @@ class _SplashScreenState extends State<SplashScreen>
                           .copyWith(color: Colors.white),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  const _GlitchText(
-                    baseText: 'TRACE DETECTED',
-                    altText: 'SIGNAL LOCK INBOUND',
-                    duration: Duration(milliseconds: 1200),
-                  ),
                 ],
               ),
             ),
@@ -175,59 +266,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-class _ScanlinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = Colors.white.withOpacity(0.04)..strokeWidth = 1;
-    for (double y = 0; y < size.height; y += 3) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), p);
-    }
-  }
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _GlitchText extends StatefulWidget {
-  final String baseText;
-  final String altText;
-  final Duration duration;
-  const _GlitchText({required this.baseText, required this.altText, required this.duration});
-  @override
-  State<_GlitchText> createState() => _GlitchTextState();
-}
-class _GlitchTextState extends State<_GlitchText> {
-  late Timer _t; late DateTime _start; final _rng = Random();
-  String _txt = ''; double _jx = 0, _jy = 0, _op = 1;
-  @override void initState() {
-    super.initState(); _start = DateTime.now(); _txt = widget.baseText;
-    _t = Timer.periodic(const Duration(milliseconds: 60), _tick);
-  }
-  void _tick(Timer _) {
-    final elapsed = DateTime.now().difference(_start);
-    if (elapsed > widget.duration) { setState(() { _txt = widget.baseText; _jx = 0; _jy = 0; _op = 1; }); _t.cancel(); return; }
-    final useAlt = _rng.nextDouble() < 0.18; final src = useAlt ? widget.altText : widget.baseText;
-    final chars = src.split(''); for (int i=0;i<2;i++){ final pos=_rng.nextInt(chars.length); chars[pos] = _g(); }
-    setState(() { _txt = chars.join(); _jx = (_rng.nextDouble()-0.5)*2; _jy = (_rng.nextDouble()-0.5)*1.5; _op = 0.85+_rng.nextDouble()*0.15; });
-  }
-  String _g(){ const g=r'█▓▒░#%*@/+=-<>|[]{}()'; return g[Random().nextInt(g.length)]; }
-  @override void dispose(){ _t.cancel(); super.dispose(); }
-  @override Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.headlineSmall!;
-    return Opacity(
-      opacity: _op,
-      child: Stack(alignment: Alignment.center, children: [
-        Transform.translate(offset: Offset(_jx-1.2,_jy),
-          child: Text(_txt, style: style.copyWith(color: NeuroTheme.teal.withOpacity(0.8)))),
-        Transform.translate(offset: Offset(_jx+1.2,_jy),
-          child: Text(_txt, style: style.copyWith(color: NeuroTheme.amber.withOpacity(0.8)))),
-        Transform.translate(offset: Offset(_jx,_jy),
-          child: Text(_txt, style: style.copyWith(color: Colors.white))),
-      ]),
-    );
-  }
-}
-
-/// ---------------------- GAME (Simon-style 3×5) ----------------------
+/// ---------------------- GAME (memory: Simon-like) ----------------------
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
   @override
@@ -243,15 +282,23 @@ class _GameScreenState extends State<GameScreen> {
   List<int> _sequence = [];
   int _inputIndex = 0;
   bool _showingSequence = true;
-  Set<int> _lit = {};          // green flash
-  Set<int> _wrongLit = {};     // red flash (❌ when wrong)
+  Set<int> _lit = {};
+  Set<int> _wrongLit = {};
   int _round = 0;
   int _best = 0;
+
+  bool _screenFlash = false;
+
+  final ValueNotifier<int> _bgTrigger = ValueNotifier(0);
 
   @override
   void initState() {
     super.initState();
     _startNewGame();
+  }
+
+  void _nudgeBackground() {
+    _bgTrigger.value++;
   }
 
   void _startNewGame() {
@@ -272,9 +319,9 @@ class _GameScreenState extends State<GameScreen> {
     setState(() { _showingSequence = true; _lit.clear(); _wrongLit.clear(); });
     await Future.delayed(const Duration(milliseconds: 400));
 
-    // Speed up as it grows
     final onMs = max(220, 560 - _sequence.length * 25);
     for (final idx in _sequence) {
+      _nudgeBackground();
       setState(() { _lit = {idx}; _wrongLit.clear(); });
       await Future.delayed(Duration(milliseconds: onMs));
       setState(() => _lit.clear());
@@ -286,17 +333,15 @@ class _GameScreenState extends State<GameScreen> {
 
   void _onTileTap(int index) {
     if (_showingSequence) return;
+    _nudgeBackground();
 
     final correct = _sequence[_inputIndex] == index;
 
-    // brief feedback on tap (green or red handled below)
     if (correct) {
       setState(() => _lit = {index});
       Future.delayed(const Duration(milliseconds: 140),
           () => mounted ? setState(() => _lit.clear()) : null);
-    }
-
-    if (!correct) {
+    } else {
       _flashWrong(index).then((_) {
         _best = max(_best, _round - 1);
         _gameOver();
@@ -310,18 +355,12 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
-  /// 🔴 Flash the tapped tile red a couple of times, then continue.
   Future<void> _flashWrong(int index) async {
-    setState(() { _wrongLit = {index}; _lit.clear(); });
-    await Future.delayed(const Duration(milliseconds: 160));
+    setState(() { _wrongLit = {index}; _lit.clear(); _screenFlash = true; });
+    _nudgeBackground();
+    await Future.delayed(const Duration(milliseconds: 140));
     if (!mounted) return;
-    setState(() => _wrongLit.clear());
-    await Future.delayed(const Duration(milliseconds: 120));
-    if (!mounted) return;
-    setState(() => _wrongLit = {index});
-    await Future.delayed(const Duration(milliseconds: 160));
-    if (!mounted) return;
-    setState(() => _wrongLit.clear());
+    setState(() { _wrongLit.clear(); _screenFlash = false; });
   }
 
   Future<void> _gameOver() async {
@@ -330,9 +369,8 @@ class _GameScreenState extends State<GameScreen> {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: NeuroTheme.panel,
-        title:
-            const Text('TRACE LOCKED', style: TextStyle(fontWeight: FontWeight.w800)),
-        content: Text('You freed ${max(0, _round - 1)} souls.\nBest: $_best',
+        title: const Text('TRACE LOCKED', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Text('You matched ${max(0, _round - 1)} rounds.\nBest: $_best',
             style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
@@ -347,99 +385,66 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pad = 16.0;
-
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: ShaderMask(
-          shaderCallback: (r) => NeuroTheme.brandGradient().createShader(r),
-          child: Text('NEUROTRACE',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall!
-                  .copyWith(color: Colors.white)),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text('Souls: ${max(0, _round - 1)}',
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 10,
-            children: [
-              _chip(Icons.visibility, _showingSequence ? 'Watch' : 'Your turn'),
-              _chip(Icons.layers, 'Round $_round'),
-              _chip(Icons.star, 'Best $_best'),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // Grid fills portrait nicely
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: pad, vertical: 12),
-              child: LayoutBuilder(
-                builder: (context, c) {
-                  final gap = 12.0;
-                  final totalGapW = (cols - 1) * gap;
-                  final size = ((c.maxWidth - totalGapW) / cols).clamp(44, 160);
-                  final gridH = size * rows + gap * (rows - 1);
-
-                  return Center(
-                    child: SizedBox(
-                      width: size * cols + totalGapW,
-                      height: gridH,
-                      child: GridView.builder(
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: cols,
-                          crossAxisSpacing: gap,
-                          mainAxisSpacing: gap,
-                        ),
-                        itemCount: gridSize,
-                        itemBuilder: (context, i) {
-                          final isOn = _lit.contains(i);
-                          final isWrong = _wrongLit.contains(i);
-                          return _Tile(
-                            on: isOn,
-                            wrong: isWrong,
-                            disabled: _showingSequence,
-                            onTap: () => _onTileTap(i),
-                          );
-                        },
-                      ),
+      body: Stack(children: [
+        NeuroBg(trigger: _bgTrigger),
+        Column(
+          children: [
+            const SizedBox(height: 56),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ShaderMask(
+                      shaderCallback: (r) =>
+                          NeuroTheme.brandGradient().createShader(r),
+                      child: const Text('NEUROTRACE',
+                          style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white)),
                     ),
+                  ),
+                  Text('Best $_best',
+                      style: Theme.of(context).textTheme.headlineSmall),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(24),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                itemCount: gridSize,
+                itemBuilder: (context, i) {
+                  final isOn = _lit.contains(i);
+                  final isWrong = _wrongLit.contains(i);
+                  return _Tile(
+                    on: isOn,
+                    wrong: isWrong,
+                    disabled: _showingSequence,
+                    onTap: () => _onTileTap(i),
                   );
                 },
               ),
             ),
+          ],
+        ),
+        // screen flash on error
+        IgnorePointer(
+          ignoring: true,
+          child: AnimatedOpacity(
+            opacity: _screenFlash ? 0.18 : 0.0,
+            duration: const Duration(milliseconds: 100),
+            child: Container(color: NeuroTheme.error),
           ),
-          const SizedBox(height: 12),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: NeuroTheme.panel,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 16, color: NeuroTheme.amber),
-        const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
       ]),
     );
   }
@@ -447,8 +452,8 @@ class _GameScreenState extends State<GameScreen> {
 
 /// ---------------------- TILE ----------------------
 class _Tile extends StatelessWidget {
-  final bool on;        // green lit (sequence/confirm)
-  final bool wrong;     // red flash when incorrect
+  final bool on;
+  final bool wrong;
   final bool disabled;
   final VoidCallback onTap;
 
