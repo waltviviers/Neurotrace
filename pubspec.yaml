@@ -1,23 +1,21 @@
 name: neurotrace
-description: >
-  A cyberpunk-inspired memory game. You're a neuromancer freeing trapped minds
-  while avoiding the trace.
+description: A memory puzzle hacking game.
 publish_to: "none"
 
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ">=3.2.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^1.0.6
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^2.0.0
   flutter_launcher_icons: ^0.13.1
 
 flutter:
@@ -25,11 +23,11 @@ flutter:
 
   assets:
     - assets/logo.png
-    - assets/bg_circuit.png
+    - assets/background.png
 
-flutter_launcher_icons:
+flutter_icons:
   android: true
-  ios: true
+  ios: false
   image_path: "assets/logo.png"
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "assets/logo.png"
