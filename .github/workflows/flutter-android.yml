@@ -43,7 +43,7 @@ jobs:
           VERSION_NAME=$(echo $CURRENT | cut -d+ -f1)
           BUILD_NUMBER=$(echo $CURRENT | cut -d+ -f2)
           NEW_BUILD=$((BUILD_NUMBER+1))
-          echo "New version: $VERSION_NAME+$NEW_BUILD"
+          echo "📦 New version: $VERSION_NAME+$NEW_BUILD"
           sed -i "s/^version: .*/version: $VERSION_NAME+$NEW_BUILD/" pubspec.yaml
 
       # ---------------- DEBUG BUILD ----------------
