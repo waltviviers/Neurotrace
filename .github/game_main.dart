@@ -1,6 +1,13 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // for SystemSound
+
+// ===================== CONFIG =====================
+const String LOGO_ASSET = 'assets/images/logo.png';
+// Set this to the exact off-black behind your logo so it blends perfectly.
+const Color OFF_BLACK = Color(0xFF0D0D0D); // <-- tweak to match your logo bg
+// ===================== CONFIG =====================
 
 void main() => runApp(const NeuroTraceApp());
 
@@ -12,14 +19,179 @@ class NeuroTraceApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(),
-      home: const GameScreen(),
+      home: const SplashScreen(), // start at splash
     );
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// GAME SCREEN (UI + controller wiring)
-/// ─────────────────────────────────────────────────────────────────────────────
+/// ============================================================================
+/// SPLASH → GAME
+/// ============================================================================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fadeIn;
+  late final Animation<double> _scaleIn;
+  late final Animation<double> _glitch; // 0..1 for timing the jitter
+  bool _navigated = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Precache the logo so there’s no pop-in
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      precacheImage(const AssetImage(LOGO_ASSET), context);
+    });
+
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+
+    // Gentle fade/scale in overall
+    _fadeIn = CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 0.9, curve: Curves.easeOut));
+    _scaleIn = Tween<double>(begin: 0.98, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: const Interval(0.25, 0.9, curve: Curves.easeOutBack)),
+    );
+
+    // Glitch phase in the first ~350ms
+    _glitch = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.0, 0.28, curve: Curves.easeOut),
+    );
+
+    _ctrl.forward();
+    _ctrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed) _goToGame();
+    });
+  }
+
+  void _goToGame() {
+    if (_navigated) return;
+    _navigated = true;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 400),
+        pageBuilder: (_, __, ___) => const GameScreen(),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  // Quick RGB-split offsets based on glitch progress
+  Offset _redOffset(double t) {
+    final mag = (1.0 - (t)).clamp(0, 1) * 6; // px
+    return Offset(mag, 0);
+  }
+
+  Offset _cyanOffset(double t) {
+    final mag = (1.0 - (t)).clamp(0, 1) * -6; // px opposite
+    return Offset(mag, 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _goToGame, // tap to skip
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, _) {
+          final t = _glitch.value;
+          final showGlitch = t > 0.0 && t < 1.0;
+
+          return Container(
+            color: OFF_BLACK, // exact off-black so the logo "floats"
+            child: Center(
+              child: FadeTransition(
+                opacity: _fadeIn,
+                child: Transform.scale(
+                  scale: _scaleIn.value,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Base clean logo
+                      Image.asset(LOGO_ASSET, filterQuality: FilterQuality.high),
+
+                      // Glitch layers (very brief)
+                      if (showGlitch) ...[
+                        Transform.translate(
+                          offset: _redOffset(t),
+                          child: ColorFiltered(
+                            colorFilter: const ColorFilter.mode(
+                              Color(0x55FF0000), BlendMode.plus,
+                            ),
+                            child: Image.asset(LOGO_ASSET),
+                          ),
+                        ),
+                        Transform.translate(
+                          offset: _cyanOffset(t),
+                          child: ColorFiltered(
+                            colorFilter: const ColorFilter.mode(
+                              Color(0x5500FFFF), BlendMode.plus,
+                            ),
+                            child: Image.asset(LOGO_ASSET),
+                          ),
+                        ),
+                        // scanline texture (subtle)
+                        IgnorePointer(
+                          child: Opacity(
+                            opacity: 0.07 * (1.0 - t),
+                            child: CustomPaint(
+                              size: const Size(double.infinity, 120),
+                              painter: _ScanlinePainter(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// Simple scanline painter across the top region for a quick “CRT” vibe
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white.withOpacity(0.12);
+    final gap = 3.0;
+    double y = 0;
+    final w = 220.0; // a band width; it’s centered by parent stack
+    while (y < size.height) {
+      canvas.drawRect(Rect.fromLTWH(-w / 2, y, w, 1), paint);
+      y += gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// ============================================================================
+/// GAME (your existing file, unchanged except now it’s a separate screen)
+/// ============================================================================
+
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
   @override
@@ -29,15 +201,15 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   late GameController game;
 
-  // UI runtime
-  TileRef? flashing;            // which tile is currently flashing during playback
-  bool isPlayingBack = false;   // true while showing the sequence
-  bool inputOpen = false;       // true when user can tap tiles
+  TileRef? flashing;
+  bool isPlayingBack = false;
+  bool inputOpen = false;
 
-  // simple lives/score HUD
   int lives = 3;
   int score = 0;
-  bool pulseLives = false;      // small animation flag when life is granted
+
+  bool pulseLives = false;
+  bool showPlusOne = false;
 
   @override
   void initState() {
@@ -49,22 +221,23 @@ class _GameScreenState extends State<GameScreen> {
       onScore: () {
         setState(() => score++);
       },
-      onUnlockSecondRow: () {
-        // hook for sfx/animation if you want when row 2 unlocks
-      },
+      onUnlockSecondRow: () {},
       onGrantExtraLifeOnce: () {
-        // +1 life exactly once; pulse the HUD briefly
         setState(() {
           lives = (lives + 1).clamp(0, 99);
           pulseLives = true;
+          showPlusOne = true;
         });
-        // optional toast/snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Extra life awarded!')),
-        );
+        SystemSound.play(SystemSoundType.click);
         Timer(const Duration(milliseconds: 450), () {
           if (mounted) setState(() => pulseLives = false);
         });
+        Timer(const Duration(milliseconds: 900), () {
+          if (mounted) setState(() => showPlusOne = false);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Extra life awarded!')),
+        );
       },
     );
   }
@@ -78,7 +251,6 @@ class _GameScreenState extends State<GameScreen> {
     });
 
     await game.startNewRound(onFlash: (tile, {required bool isTrap}) async {
-      // flash each tile with a quick highlight; traps flash red tint
       setState(() => flashing = tile);
       await Future.delayed(const Duration(milliseconds: 260));
       setState(() => flashing = null);
@@ -110,27 +282,21 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // --- Background ---
           Positioned.fill(
             child: Image.asset(
               'assets/images/bg_texture.png',
               fit: BoxFit.cover,
             ),
           ),
-
-          // --- Optional darken overlay for readability ---
           Positioned.fill(child: Container(color: Colors.black.withOpacity(0.35))),
-
-          // --- Foreground content ---
           SafeArea(
             child: Column(
               children: [
-                // HUD
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(
                     children: [
-                      _hudChip(Icons.favorite, 'Lives', '$lives', pulse: pulseLives),
+                      _hudChip(Icons.favorite, 'Lives', '$lives', pulse: pulseLives, plusOne: showPlusOne),
                       const SizedBox(width: 12),
                       _hudChip(Icons.auto_awesome, 'Score', '$score'),
                       const Spacer(),
@@ -138,8 +304,6 @@ class _GameScreenState extends State<GameScreen> {
                     ],
                   ),
                 ),
-
-                // Grid
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -181,8 +345,6 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                   ),
                 ),
-
-                // CTA
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   child: Row(
@@ -205,7 +367,13 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  Widget _hudChip(IconData icon, String label, String value, {bool pulse = false}) {
+  Widget _hudChip(
+    IconData icon,
+    String label,
+    String value, {
+    bool pulse = false,
+    bool plusOne = false,
+  }) {
     final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -214,6 +382,7 @@ class _GameScreenState extends State<GameScreen> {
         border: Border.all(color: Colors.white24),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 16),
           const SizedBox(width: 6),
@@ -223,22 +392,99 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
 
+    final stacked = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        chip,
+        if (plusOne)
+          const Positioned(
+            right: -6,
+            top: -12,
+            child: _RisingPlusOne(),
+          ),
+      ],
+    );
+
     return AnimatedScale(
       scale: pulse ? 1.15 : 1.0,
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutBack,
-      child: chip,
+      child: stacked,
     );
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// TILE WIDGET
-/// ─────────────────────────────────────────────────────────────────────────────
+/// Floating “+1” animation
+class _RisingPlusOne extends StatefulWidget {
+  const _RisingPlusOne({super.key});
+  @override
+  State<_RisingPlusOne> createState() => _RisingPlusOneState();
+}
+
+class _RisingPlusOneState extends State<_RisingPlusOne>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _y;
+  late final Animation<double> _alpha;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..forward();
+
+    _y = Tween<double>(begin: 0, end: -20).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
+    );
+    _alpha = Tween<double>(begin: 1, end: 0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        return Transform.translate(
+          offset: Offset(0, _y.value),
+          child: Opacity(
+            opacity: _alpha.value,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.greenAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.greenAccent.withOpacity(0.7)),
+              ),
+              child: const Text(
+                '+1',
+                style: TextStyle(
+                  color: Colors.greenAccent,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// ================== TILE WIDGET ==================
 class Tile extends StatelessWidget {
   final double size;
   final bool flashing;
-  final bool isTrapFlash; // red tint during playback if a trap
+  final bool isTrapFlash;
   final bool enabled;
 
   const Tile({
@@ -289,9 +535,7 @@ class Tile extends StatelessWidget {
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// CONTROLLER (fixed 3-flash now; scalable later)
-/// ─────────────────────────────────────────────────────────────────────────────
+/// ================== CONTROLLER ==================
 class GameController {
   GameController({
     required this.onLoseLife,
@@ -300,63 +544,44 @@ class GameController {
     required this.onGrantExtraLifeOnce,
   });
 
-  // ---- Config toggles ----
   bool scalingEnabled = false;   // OFF: keep sequence at 3
-  int baseSequenceLen = 3;       // requirement now
-  int successesThisLevel = 0;    // successful rounds completed
+  int baseSequenceLen = 3;
+  int successesThisLevel = 0;
   int level = 1;
 
-  // ---- Grid / rows ----
-  int rows = 1;                  // start at 1 row
+  int rows = 1;
   int cols = 5;
-  bool trapsEnabled = false;     // becomes true once rows >= 2
+  bool trapsEnabled = false;
 
-  // ---- Round state ----
   List<TileRef> sequence = [];
   int inputIndex = 0;
   Set<TileRef> trapTiles = {};
 
-  // ---- One-shot flags ----
-  bool _extraLifeAlreadyGranted = false; // ensures single grant on first 2nd-row unlock
+  bool _extraLifeAlreadyGranted = false;
 
-  // ---- Callbacks to UI/HUD ----
   final VoidCallback onLoseLife;
   final VoidCallback onScore;
   final VoidCallback onUnlockSecondRow;
   final VoidCallback onGrantExtraLifeOnce;
 
-  // For UI:
-  bool get canTap => sequence.isNotEmpty && inputIndex < sequence.length;
-
-  // Lifecycle
   Future<void> startNewRound({
     required Future<void> Function(TileRef tile, {required bool isTrap}) onFlash,
   }) async {
     inputIndex = 0;
-
     final length = scalingEnabled ? _computeSequenceLength() : baseSequenceLen;
     sequence = _generateSequence(length);
-
     trapTiles = trapsEnabled ? _pickTrapTilesForRound() : {};
-
-    // Playback
     for (final t in sequence) {
-      final isTrap = trapTiles.contains(t);
-      await onFlash(t, isTrap: isTrap);
+      await onFlash(t, isTrap: trapTiles.contains(t));
     }
   }
 
-  // Called from UI when a tile is tapped
   TapResult onTileTap(TileRef tapped) {
-    // Trap instant fail
     if (trapsEnabled && trapTiles.contains(tapped)) {
       onLoseLife();
       return _endRound(failed: true);
     }
-
-    // Skip over traps in the sequence (player should never tap them)
     final expected = _nextExpectedTileSkippingTraps();
-
     if (tapped == expected) {
       inputIndex++;
       if (_isRoundComplete()) {
@@ -372,11 +597,11 @@ class GameController {
     }
   }
 
-  // ---------- Helpers ----------
   int _computeSequenceLength() {
     final growth = (successesThisLevel ~/ 2);
     final cap = 10 + (rows - 1) * 3;
     return (baseSequenceLen + growth).clamp(3, cap);
+    // with scalingEnabled=false we stay at 3
   }
 
   List<TileRef> _generateSequence(int length) {
@@ -389,7 +614,7 @@ class GameController {
     final rng = Random();
     final all = _allVisibleTiles();
     if (all.isEmpty) return {};
-    final includeTrap = rng.nextDouble() < 0.4; // ~40% of rounds have 1 trap
+    final includeTrap = rng.nextDouble() < 0.4;
     return includeTrap ? {all[rng.nextInt(all.length)]} : {};
   }
 
@@ -397,11 +622,9 @@ class GameController {
     int i = inputIndex;
     while (i < sequence.length && trapTiles.contains(sequence[i])) {
       i++;
-      inputIndex = i; // auto-skip trap entries
+      inputIndex = i;
     }
-    if (inputIndex >= sequence.length) {
-      return sequence.last;
-    }
+    if (inputIndex >= sequence.length) return sequence.last;
     return sequence[inputIndex];
   }
 
@@ -415,17 +638,12 @@ class GameController {
   }
 
   void _maybeUnlockRowAndExtras() {
-    // Every 3 successes -> add a row
     if (successesThisLevel % 3 == 0) {
       final before = rows;
       rows = (rows + 1).clamp(1, 6);
-
-      // First time we cross into 2+ rows
       if (before < 2 && rows >= 2) {
         trapsEnabled = true;
         onUnlockSecondRow();
-
-        // Grant exactly one extra life the first time row 2 appears
         if (!_extraLifeAlreadyGranted) {
           _extraLifeAlreadyGranted = true;
           onGrantExtraLifeOnce();
@@ -437,13 +655,10 @@ class GameController {
   List<TileRef> _allVisibleTiles() => gridTilesFor(rows, cols);
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// MODELS / HELPERS
-/// ─────────────────────────────────────────────────────────────────────────────
+/// ================== MODELS ==================
 class TileRef {
   final int r, c;
   const TileRef(this.r, this.c);
-
   @override
   bool operator ==(Object o) => o is TileRef && o.r == r && o.c == c;
   @override
