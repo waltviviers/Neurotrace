@@ -1,43 +1,22 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Lock to portrait
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  runApp(const NeuroTraceApp());
-}
+void main() => runApp(const NeuroTraceApp());
 
 class NeuroTraceApp extends StatelessWidget {
   const NeuroTraceApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final theme = ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xFF0C1014),
-      colorScheme: const ColorScheme.dark(
-        primary: Color(0xFF13C7B9), // teal-ish
-        secondary: Color(0xFFF5B646), // amber-ish
-        surface: Color(0xFF12171D),
-        onSurface: Colors.white,
-      ),
-      textTheme: const TextTheme(
-        headlineSmall: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 1.0),
-        titleMedium: TextStyle(fontWeight: FontWeight.w600),
-      ),
-      useMaterial3: true,
-    );
-
     return MaterialApp(
-      title: 'NEUROTRACE',
+      title: 'NeuroTrace',
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0B1114),
+        fontFamily: 'Roboto',
+      ),
       debugShowCheckedModeBanner: false,
-      theme: theme,
       home: const GameScreen(),
     );
   }
@@ -45,549 +24,442 @@ class NeuroTraceApp extends StatelessWidget {
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
-
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
 
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
-  // Grid: 3 x 5
-  static const int rows = 5;
-  static const int cols = 3;
-  static const Duration stepOn = Duration(milliseconds: 480);
-  static const Duration stepGap = Duration(milliseconds: 140);
+  // --- Tunables ---
+  static const int startRows = 1;
+  static const int maxRows = 5; // cap growth
+  static const int cols = 5;
+  static const int startingLives = 2;
+  static const Duration flashOn = Duration(milliseconds: 450);
+  static const Duration flashGap = Duration(milliseconds: 200);
+  static const double trapChanceBase = 0.18; // 18% per step once traps enabled
+  static const double trapChanceGrowth = 0.02; // tiny bump each added row
 
-  final Random _rng = Random();
-  final List<int> _sequence = <int>[];
-  final List<int> _player = <int>[];
+  // --- Colors (NT palette) ---
+  static const Color teal = Color(0xFF22D3EE);
+  static const Color amber = Color(0xFFF59E0B);
+  static const Color tileOff = Color(0xFF1B242A);
+  static const Color tileOn = Color(0xFF28E1B9);
+  static const Color tileTrap = Color(0xFFE11D48); // red
+  static const Color glow = Color(0xFF00FFC3);
 
-  late List<AnimationController> _glowCtrls;
-  late List<AnimationController> _errorCtrls;
+  // --- State ---
+  int rows = startRows;
+  int lives = startingLives;
+  int souls = 0;
 
-  int _level = 1;
-  bool _inputEnabled = false;
-  bool _isPlayingDemo = false;
-  int _score = 0;
+  int level = 1; // round length grows with level
+  int correctSoFar = 0;
+  int roundsSinceRowUp = 0;
+
+  List<int> pattern = [];
+  Set<int> traps = {}; // indices that flashed red in current pattern
+
+  bool isShowing = false;
+  bool inputOpen = false;
+
+  // visual feedback
+  int? litIndex; // tile currently lit for playback
+  Set<int> pressed = {}; // user press highlight
+  bool wrongFlash = false;
+
+  final rnd = Random();
 
   @override
   void initState() {
     super.initState();
-    final total = rows * cols;
-    _glowCtrls = List<AnimationController>.generate(
-      total,
-      (_) => AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 220),
-        lowerBound: 0.0,
-        upperBound: 1.0,
-      ),
-    );
-    _errorCtrls = List<AnimationController>.generate(
-      total,
-      (_) => AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 180),
-        lowerBound: 0.0,
-        upperBound: 1.0,
-      ),
-    );
-    _newGame();
+    _startNewRun();
   }
 
-  @override
-  void dispose() {
-    for (final c in _glowCtrls) {
-      c.dispose();
-    }
-    for (final c in _errorCtrls) {
-      c.dispose();
-    }
-    super.dispose();
+  void _startNewRun() {
+    rows = startRows;
+    lives = startingLives;
+    souls = 0;
+    level = 1;
+    roundsSinceRowUp = 0;
+    _nextRound();
   }
 
-  void _newGame() {
-    _sequence.clear();
-    _player.clear();
-    _score = 0;
-    _level = 1;
-    _extendSequence();
-    _playSequence();
-  }
+  int get gridCount => rows * cols;
 
-  void _extendSequence() {
-    final total = rows * cols;
-    _sequence.add(_rng.nextInt(total));
+  // Determine if traps are active: after we've revealed the 2nd row once.
+  bool get trapsEnabled => rows >= 2 && lives > startingLives - 1;
+
+  Future<void> _nextRound() async {
+    setState(() {
+      correctSoFar = 0;
+      litIndex = null;
+      pressed.clear();
+      wrongFlash = false;
+      inputOpen = false;
+      traps.clear();
+    });
+
+    // Create a new pattern with current length = min(level+2, gridCount)
+    final length = min(level + 2, gridCount);
+    pattern = List<int>.generate(length, (_) => rnd.nextInt(gridCount));
+
+    await _playSequence();
+
+    setState(() {
+      inputOpen = true;
+      correctSoFar = 0;
+    });
   }
 
   Future<void> _playSequence() async {
-    setState(() {
-      _inputEnabled = false;
-      _isPlayingDemo = true;
-      _player.clear();
-    });
+    isShowing = true;
+    inputOpen = false;
+    traps.clear();
 
-    await Future.delayed(const Duration(milliseconds: 420));
+    final trapChance =
+        trapsEnabled ? (trapChanceBase + (rows - 2) * trapChanceGrowth) : 0.0;
 
-    for (final idx in _sequence) {
-      await _flashTile(idx);
-      await Future.delayed(stepGap);
+    for (int i = 0; i < pattern.length; i++) {
+      final idx = pattern[i];
+
+      // Decide if this step is a trap (only if traps are enabled and not same index twice in a row)
+      final bool isTrap = trapsEnabled && rnd.nextDouble() < trapChance;
+
+      setState(() {
+        litIndex = idx;
+        if (isTrap) traps.add(idx);
+      });
+
+      await Future.delayed(flashOn);
+
+      setState(() => litIndex = null);
+      await Future.delayed(flashGap);
     }
 
-    setState(() {
-      _inputEnabled = true;
-      _isPlayingDemo = false;
-    });
+    isShowing = false;
   }
 
-  Future<void> _flashTile(int index) async {
-    final c = _glowCtrls[index];
-    try {
-      await c.forward();
-      await Future.delayed(stepOn);
-      await c.reverse();
-    } catch (_) {}
-  }
+  Future<void> _onTileTap(int index) async {
+    if (!inputOpen || wrongFlash) return;
 
-  Future<void> _flashError(int index) async {
-    final e = _errorCtrls[index];
-    try {
-      await e.forward();
-      await Future.delayed(const Duration(milliseconds: 120));
-      await e.reverse();
-    } catch (_) {}
-  }
-
-  Future<void> _onTapTile(int index) async {
-    if (!_inputEnabled || _isPlayingDemo) return;
-
-    // Give a tiny active flash even during input
-    unawaited(_glowCtrls[index].forward().then((_) => _glowCtrls[index].reverse()));
-
-    _player.add(index);
-
-    final pos = _player.length - 1;
-    if (_sequence[pos] != index) {
-      // Wrong — flash that tile red and replay
-      await _flashError(index);
-      setState(() {
-        _score = max(0, _score - 1);
-      });
-      _player.clear();
-      _inputEnabled = false;
-      await Future.delayed(const Duration(milliseconds: 350));
-      await _playSequence();
+    // Trap tapped? immediate penalty & round fail
+    if (traps.contains(index)) {
+      await _loseLifeWithFlash(index);
       return;
     }
 
-    // Correct so far
-    if (_player.length == _sequence.length) {
-      // Completed level
-      setState(() {
-        _score += 3 + _level; // small reward
-        _level += 1;
-      });
-      _extendSequence();
-      _inputEnabled = false;
-      await Future.delayed(const Duration(milliseconds: 420));
-      await _playSequence();
+    setState(() => pressed.add(index));
+    await Future.delayed(const Duration(milliseconds: 120));
+    setState(() => pressed.remove(index));
+
+    // Must match expected step, skipping traps (which aren't in the expected order)
+    if (index == pattern[correctSoFar]) {
+      correctSoFar++;
+      if (correctSoFar >= pattern.length) {
+        // Round cleared
+        souls++; // you freed another soul
+        level++;
+        roundsSinceRowUp++;
+
+        // Every 3 cleared rounds -> add a row (and one-time bonus when reaching 2 rows)
+        if (roundsSinceRowUp >= 3 && rows < maxRows) {
+          roundsSinceRowUp = 0;
+          rows++;
+          if (rows == 2) {
+            // “Second row revealed” bonus life
+            lives++;
+          }
+        }
+        await _celebrateAndContinue();
+      }
     } else {
-      // Partial progress
-      setState(() {
-        _score += 1;
-      });
+      await _loseLifeWithFlash(index);
     }
   }
 
+  Future<void> _celebrateAndContinue() async {
+    setState(() {
+      inputOpen = false;
+      litIndex = null;
+    });
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    _nextRound();
+  }
+
+  Future<void> _loseLifeWithFlash(int index) async {
+    setState(() {
+      wrongFlash = true;
+      pressed.add(index);
+    });
+    await Future.delayed(const Duration(milliseconds: 220));
+    setState(() {
+      pressed.remove(index);
+    });
+
+    lives--;
+    if (lives <= 0) {
+      // Game over -> restart run after a short beat
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      _startNewRun();
+      return;
+    }
+
+    // retry same level
+    await Future.delayed(const Duration(milliseconds: 250));
+    if (!mounted) return;
+    _nextRound();
+  }
+
+  // --- UI ---
+
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final size = MediaQuery.of(context).size;
-
     return Stack(
       children: [
-        // Background image + subtle gradient tint
-        DecoratedBox(
-          decoration: BoxDecoration(
-            image: const DecorationImage(
-              image: AssetImage('assets/bg_texture.png'),
-              fit: BoxFit.cover,
-            ),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                cs.primary.withOpacity(0.12),
-                cs.secondary.withOpacity(0.12),
-              ],
-            ),
+        // background image (PNG)
+        Positioned.fill(
+          child: Image.asset(
+            'assets/bg_circuits.png',
+            fit: BoxFit.cover,
+            color: Colors.black.withOpacity(0.10),
+            colorBlendMode: BlendMode.darken,
           ),
-          child: const SizedBox.expand(),
         ),
-
-        // Content
         Scaffold(
-          backgroundColor: Colors.black.withOpacity(0.15),
+          backgroundColor: Colors.transparent,
           body: SafeArea(
             child: Column(
               children: [
+                _buildHeader(),
                 const SizedBox(height: 8),
-                _HeaderBar(score: _score),
+                _buildChips(),
                 const SizedBox(height: 8),
-
-                // Level / status
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Row(
-                    children: [
-                      _Pill(
-                        icon: Icons.memory,
-                        label: 'Level',
-                        value: '$_level',
-                      ),
-                      const SizedBox(width: 12),
-                      _Pill(
-                        icon: Icons.grid_3x3,
-                        label: 'Grid',
-                        value: '3×5',
-                      ),
-                      const Spacer(),
-                      _Pill(
-                        icon: _isPlayingDemo ? Icons.visibility : Icons.touch_app,
-                        label: _isPlayingDemo ? 'Watch' : 'Repeat',
-                        value: _isPlayingDemo ? 'Demo' : 'Now',
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Grid stretches in portrait
-                Expanded(
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: 3 / 5, // 3 columns × 5 rows
-                      child: _TileGrid(
-                        rows: rows,
-                        cols: cols,
-                        glowCtrls: _glowCtrls,
-                        errorCtrls: _errorCtrls,
-                        onTap: _onTapTile,
-                        inputEnabled: _inputEnabled && !_isPlayingDemo,
-                      ),
-                    ),
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isPlayingDemo ? null : _newGame,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('New Run'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            backgroundColor: cs.surface.withOpacity(0.7),
-                            foregroundColor: cs.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                Expanded(child: _buildGrid()),
+                _buildBottomBar(),
               ],
-            ),
-          ),
-        ),
-
-        // Very soft vignette
-        IgnorePointer(
-          ignoring: true,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.15),
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.25),
-                ],
-              ),
             ),
           ),
         ),
       ],
     );
   }
-}
 
-class _HeaderBar extends StatelessWidget {
-  const _HeaderBar({required this.score});
-  final int score;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
+  Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 2),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
       child: Row(
         children: [
-          // Logo + title
-          Row(
-            children: [
-              // Your logo
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  image: const DecorationImage(
-                    image: AssetImage('assets/logo.png'),
-                    fit: BoxFit.contain,
-                  ),
+          Image.asset('assets/logo.png', height: 24),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ShaderMask(
+              shaderCallback: (r) => const LinearGradient(
+                colors: [teal, amber],
+              ).createShader(r),
+              child: const Text(
+                'NEUROTRACE',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 24,
+                  letterSpacing: 1.0,
                 ),
               ),
-              const SizedBox(width: 10),
-              ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: <Color>[cs.primary, cs.secondary],
-                  ).createShader(bounds);
-                },
-                child: const Text(
-                  'NEUROTRACE',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                    color: Colors.white, // masked
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          // Score pill
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: cs.surface.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.favorite, size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  'Souls: $score',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ],
             ),
           ),
+          const SizedBox(width: 8),
+          const Icon(Icons.favorite, size: 18, color: Colors.white70),
+          const SizedBox(width: 4),
+          Text('Souls: $souls',
+              style:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildChips() {
+    return SizedBox(
+      height: 40,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            _HudChip(icon: Icons.memory, label: 'Level $level'),
+            const SizedBox(width: 8),
+            _HudChip(icon: Icons.grid_3x3, label: 'Grid ${rows}×$cols'),
+            const SizedBox(width: 8),
+            _HudChip(
+              icon: Icons.warning_amber_rounded,
+              label: trapsEnabled ? 'Traps ON' : 'Traps OFF',
+              tint: trapsEnabled ? amber : Colors.white70,
+            ),
+            const SizedBox(width: 8),
+            _HudChip(
+              icon: Icons.favorite_rounded,
+              label: 'Lives $lives',
+              tint: lives > 1 ? Colors.white70 : tileTrap,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGrid() {
+    final double sidePadding = 16;
+    final size = MediaQuery.of(context).size;
+    final availableWidth = size.width - sidePadding * 2;
+
+    // portrait-friendly square tiles with spacing
+    const spacing = 12.0;
+    final tileSize = (availableWidth - (cols - 1) * spacing) / cols;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: sidePadding, vertical: 8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(rows, (r) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: r == rows - 1 ? 0 : spacing),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(cols, (c) {
+                final index = r * cols + c;
+                return Padding(
+                  padding: EdgeInsets.only(right: c == cols - 1 ? 0 : spacing),
+                  child: _Tile(
+                    size: tileSize,
+                    on: litIndex == index,
+                    pressed: pressed.contains(index),
+                    isTrapFlash: litIndex == index && traps.contains(index),
+                    showTrapRing: trapsEnabled,
+                    onTap: () => _onTileTap(index),
+                  ),
+                );
+              }),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: SizedBox(
+          height: 48,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white.withOpacity(0.06),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: isShowing ? null : () => _startNewRun(),
+            icon: const Icon(Icons.refresh),
+            label: const Text('New Run'),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.label, required this.value});
+class _HudChip extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String value;
+  final Color? tint;
+  const _HudChip({required this.icon, required this.label, this.tint});
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: cs.surface.withOpacity(0.7),
+        color: Colors.black.withOpacity(0.35),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: cs.onSurface),
+          Icon(icon, size: 16, color: tint ?? Colors.white70),
           const SizedBox(width: 6),
-          Text(
-            '$label ',
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: cs.primary,
-            ),
-          ),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+              )),
         ],
       ),
-    );
-  }
-}
-
-class _TileGrid extends StatelessWidget {
-  const _TileGrid({
-    required this.rows,
-    required this.cols,
-    required this.glowCtrls,
-    required this.errorCtrls,
-    required this.onTap,
-    required this.inputEnabled,
-  });
-
-  final int rows;
-  final int cols;
-  final List<AnimationController> glowCtrls;
-  final List<AnimationController> errorCtrls;
-  final void Function(int) onTap;
-  final bool inputEnabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final spacing = 12.0;
-        final tileW = (constraints.maxWidth - spacing * (cols - 1)) / cols;
-        final tileH = (constraints.maxHeight - spacing * (rows - 1)) / rows;
-        final size = min(tileW, tileH);
-
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List<Widget>.generate(rows, (r) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: r == rows - 1 ? 0 : spacing),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List<Widget>.generate(cols, (c) {
-                  final index = r * cols + c;
-                  return Padding(
-                    padding: EdgeInsets.only(right: c == cols - 1 ? 0 : spacing),
-                    child: _Tile(
-                      size: size,
-                      cs: cs,
-                      glow: glowCtrls[index],
-                      error: errorCtrls[index],
-                      onTap: inputEnabled ? () => onTap(index) : null,
-                    ),
-                  );
-                }),
-              ),
-            );
-          }),
-        );
-      },
     );
   }
 }
 
 class _Tile extends StatelessWidget {
+  final double size;
+  final bool on;
+  final bool pressed;
+  final bool isTrapFlash;
+  final bool showTrapRing;
+  final VoidCallback onTap;
+
   const _Tile({
+    super.key,
     required this.size,
-    required this.cs,
-    required this.glow,
-    required this.error,
+    required this.on,
+    required this.pressed,
+    required this.isTrapFlash,
+    required this.showTrapRing,
     required this.onTap,
   });
 
-  final double size;
-  final ColorScheme cs;
-  final AnimationController glow;
-  final AnimationController error;
-  final VoidCallback? onTap;
-
   @override
   Widget build(BuildContext context) {
-    final Animation<double> glowA = CurvedAnimation(
-      parent: glow,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    final Animation<double> errA = CurvedAnimation(
-      parent: error,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
+    final Color baseColor = isTrapFlash
+        ? _GameScreenState.tileTrap
+        : (on || pressed ? _GameScreenState.tileOn : _GameScreenState.tileOff);
 
-    final List<BoxShadow> baseShadow = <BoxShadow>[
-      BoxShadow(
-        color: Colors.black.withOpacity(0.35),
-        blurRadius: 12,
-        spreadRadius: 1,
-        offset: const Offset(2, 4),
-      ),
-    ];
+    final List<BoxShadow> shadow = (on || pressed || isTrapFlash)
+        ? [
+            BoxShadow(
+              color: (isTrapFlash
+                      ? _GameScreenState.tileTrap
+                      : _GameScreenState.glow)
+                  .withOpacity(0.55),
+              blurRadius: 24,
+              spreadRadius: 1,
+            ),
+          ]
+        : [];
 
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedBuilder(
-        animation: Listenable.merge([glowA, errA]),
-        builder: (context, _) {
-          final glowStrength = glowA.value;
-          final errStrength = errA.value;
-
-          // Blend colors: teal glow or red flash
-          final Color tileColor = Color.lerp(
-                const Color(0xFF1D2732),
-                cs.primary,
-                glowStrength * 0.8,
-              ) ??
-              const Color(0xFF1D2732);
-
-          final List<BoxShadow> shadow = <BoxShadow>[
-            ...baseShadow,
-            if (glowStrength > 0)
-              BoxShadow(
-                color: cs.primary.withOpacity(0.55 * glowStrength),
-                blurRadius: 24 + 24 * glowStrength,
-                spreadRadius: 1 + 2 * glowStrength,
-              ),
-            if (errStrength > 0)
-              BoxShadow(
-                color: Colors.redAccent.withOpacity(0.7 * errStrength),
-                blurRadius: 28,
-                spreadRadius: 2,
-              ),
-          ];
-
-          return Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: tileColor,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: shadow,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: <Color>[
-                  tileColor.withOpacity(0.95),
-                  tileColor.withOpacity(0.75),
-                ],
-              ),
-            ),
-            child: AnimatedOpacity(
-              opacity: errStrength > 0 ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 80),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.35 * errStrength),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-            ),
-          );
-        },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: baseColor,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: shadow,
+          border: showTrapRing && isTrapFlash
+              ? Border.all(
+                  color: _GameScreenState.tileTrap.withOpacity(0.9), width: 3)
+              : null,
+        ),
       ),
     );
   }
