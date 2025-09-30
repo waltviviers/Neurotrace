@@ -3,71 +3,48 @@ name: Build NeuroTrace APK (Debug)
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - "README.md"
-      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
 
-    env:
-      FLUTTER_CHANNEL: stable
-      JAVA_VERSION: "17"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---- Java & Flutter ----------------------------------------------------
-      - name: Setup Java (JDK ${{ env.JAVA_VERSION }})
+      - name: Setup Java (JDK 17)
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Setup Flutter (${{ env.FLUTTER_CHANNEL }})
+      - name: Setup Flutter (stable)
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
+          channel: 'stable'
 
-      # ---- Caches ------------------------------------------------------------
-      - name: Pub cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
-
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      # ---- Get deps & sanity checks -----------------------------------------
       - name: Flutter pub get
         run: flutter pub get
 
-      # Optional, uncomment if you want static analysis to fail the build
-      # - name: Flutter analyze
-      #   run: flutter analyze
+      # 🔧 Generate missing Android Gradle project (safe to run every build)
+      - name: Create Flutter project scaffolding (Android only)
+        run: flutter create . --platforms=android
 
-      # ---- Build APK ---------------------------------------------------------
+      # (optional) Generate Android launcher icons if config exists
+      - name: Generate launcher icons (Android)
+        run: |
+          if grep -q "flutter_launcher_icons:" pubspec.yaml; then
+            flutter pub run flutter_launcher_icons
+          else
+            echo "flutter_launcher_icons not configured; skipping."
+          fi
+
       - name: Build APK (debug)
         run: flutter build apk --debug
 
-      # ---- Upload artifact ---------------------------------------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neurotrace-debug-${{ github.sha }}
+          name: NeuroTrace-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
