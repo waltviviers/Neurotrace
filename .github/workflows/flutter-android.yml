@@ -1,9 +1,12 @@
 name: Build NeuroTrace APK (Debug)
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
 
 jobs:
   build-android:
@@ -17,31 +20,33 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Setup Flutter (stable)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable        # don't set flutter-version alongside channel
           cache: true
 
       - name: Flutter pub get
         run: flutter pub get
 
-      # If your repo does NOT contain /android (e.g., web-only at first), 
-      # uncomment this step to scaffold Android. Otherwise leave it out.
-      # - name: Ensure Android scaffolding exists
-      #   run: |
-      #     if [ ! -d "android" ]; then
-      #       flutter create --platforms android .
-      #     fi
+      - name: Ensure Android scaffolding exists
+        shell: bash
+        run: |
+          if [ ! -f android/app/src/main/AndroidManifest.xml ]; then
+            echo "Android scaffolding missing — creating it..."
+            flutter create . --platforms=android
+          else
+            echo "Android scaffolding already present."
+          fi
 
       - name: Build APK (debug)
         run: flutter build apk --debug
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: neurotrace-debug-apk
+          name: NeuroTrace-debug-${{ github.sha }}
           path: build/app/outputs/flutter-apk/app-debug.apk
