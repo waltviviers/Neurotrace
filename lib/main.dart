@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Lock to portrait
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -12,479 +13,581 @@ void main() async {
   runApp(const NeuroTraceApp());
 }
 
-/// ---------------------- THEME & COLORS ----------------------
-class NeuroTheme {
-  static const Color teal = Color(0xFF00D1C7);
-  static const Color amber = Color(0xFFF6B21A);
-  static const Color bg = Color(0xFF0E1318);
-  static const Color panel = Color(0xFF171D24);
-  static const Color tileOff = Color(0xFF212A33);
-  static const Color tileOn = Color(0xFF22E5B2);
-  static const Color error = Color(0xFFFF4D4D);
-
-  static const shadowGlow = [
-    BoxShadow(
-      blurRadius: 24,
-      spreadRadius: -4,
-      offset: Offset(0, 8),
-      color: Color(0x8000FFC2),
-    ),
-  ];
-
-  static LinearGradient brandGradient({
-    Alignment begin = Alignment.centerLeft,
-    Alignment end = Alignment.centerRight,
-  }) =>
-      const LinearGradient(colors: [teal, amber], begin: begin, end: end);
-
-  static ThemeData theme = ThemeData(
-    brightness: Brightness.dark,
-    scaffoldBackgroundColor: bg,
-    colorScheme: const ColorScheme.dark(
-      primary: teal,
-      secondary: amber,
-      surface: panel,
-      error: error,
-    ),
-    textTheme: const TextTheme(
-      headlineLarge:
-          TextStyle(fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: 1),
-      headlineSmall:
-          TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white70),
-      bodyMedium: TextStyle(fontSize: 14, color: Colors.white70),
-    ),
-    useMaterial3: true,
-  );
-}
-
-/// ---------------------- PARALLAX BACKGROUND ----------------------
-class NeuroBg extends StatefulWidget {
-  const NeuroBg({super.key, this.trigger});
-  /// Increment this notifier to make the background drift & ease back.
-  final ValueNotifier<int>? trigger;
-
-  @override
-  State<NeuroBg> createState() => _NeuroBgState();
-}
-
-class _NeuroBgState extends State<NeuroBg> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<Offset> _anim;
-  final Random _rng = Random();
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300));
-    _anim = Tween<Offset>(begin: Offset.zero, end: Offset.zero)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-
-    widget.trigger?.addListener(_nudge);
-  }
-
-  void _nudge() {
-    final dx = (_rng.nextDouble() - 0.5) * 24; // pixels to drift
-    final dy = (_rng.nextDouble() - 0.5) * 24;
-    _anim = Tween<Offset>(begin: Offset(dx, dy), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-    _ctrl
-      ..reset()
-      ..forward();
-  }
-
-  @override
-  void dispose() {
-    widget.trigger?.removeListener(_nudge);
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (_, __) {
-        return Stack(children: [
-          Positioned.fill(
-            child: Transform.translate(
-              offset: _anim.value,
-              child: Image.asset(
-                'assets/bg_circuit.png',
-                fit: BoxFit.cover,
-                color: Colors.black.withOpacity(0.55),
-                colorBlendMode: BlendMode.darken,
-              ),
-            ),
-          ),
-          // Soft vertical vignette
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.14),
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.22),
-                  ],
-                  stops: const [0.0, 0.5, 1.0],
-                ),
-              ),
-            ),
-          ),
-        ]);
-      },
-    );
-  }
-}
-
-/// ---------------------- APP ----------------------
 class NeuroTraceApp extends StatelessWidget {
   const NeuroTraceApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'NeuroTrace',
-      debugShowCheckedModeBanner: false,
-      theme: NeuroTheme.theme,
-      home: const SplashScreen(),
-    );
-  }
-}
-
-/// ---------------------- SPLASH (with parallax) ----------------------
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen>
-    with TickerProviderStateMixin {
-  late final AnimationController _scaleCtrl;
-  late final Animation<double> _scale;
-  late final Timer _navTimer;
-
-  // Background parallax trigger: gently pulse + a couple of stronger nudges
-  final ValueNotifier<int> _bgTrigger = ValueNotifier<int>(0);
-  late final AnimationController _pulseCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _scaleCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 950),
-    );
-    _scale = Tween(begin: 0.92, end: 1.0)
-        .animate(CurvedAnimation(parent: _scaleCtrl, curve: Curves.easeOutCubic));
-    _scaleCtrl.forward();
-
-    // Subtle repeating pulse to the background
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1600),
-    )..addStatusListener((s) {
-        if (s == AnimationStatus.completed) {
-          _bgTrigger.value++; // nudge
-          _pulseCtrl.reverse();
-        } else if (s == AnimationStatus.dismissed) {
-          _pulseCtrl.forward();
-        }
-      });
-    _pulseCtrl.forward();
-
-    _navTimer = Timer(const Duration(milliseconds: 1900), () {
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const GameScreen()),
-      );
-    });
-
-    // A couple of extra nudges for a lively first impression
-    Future.delayed(const Duration(milliseconds: 300), () => _bgTrigger.value++);
-    Future.delayed(const Duration(milliseconds: 900), () => _bgTrigger.value++);
-  }
-
-  @override
-  void dispose() {
-    _scaleCtrl.dispose();
-    _pulseCtrl.dispose();
-    _navTimer.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    return Scaffold(
-      body: Stack(
-        children: [
-          NeuroBg(trigger: _bgTrigger),
-          Center(
-            child: ScaleTransition(
-              scale: _scale,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: min(180, w * 0.45),
-                    height: min(180, w * 0.45),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      gradient: NeuroTheme.brandGradient(),
-                      boxShadow: NeuroTheme.shadowGlow,
-                    ),
-                    padding: const EdgeInsets.all(14),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.asset('assets/logo.png', fit: BoxFit.cover),
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  ShaderMask(
-                    shaderCallback: (r) =>
-                        NeuroTheme.brandGradient().createShader(r),
-                    child: Text(
-                      'NEUROTRACE',
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineLarge!
-                          .copyWith(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+    final theme = ThemeData(
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: const Color(0xFF0C1014),
+      colorScheme: const ColorScheme.dark(
+        primary: Color(0xFF13C7B9), // teal-ish
+        secondary: Color(0xFFF5B646), // amber-ish
+        surface: Color(0xFF12171D),
+        onSurface: Colors.white,
       ),
+      textTheme: const TextTheme(
+        headlineSmall: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 1.0),
+        titleMedium: TextStyle(fontWeight: FontWeight.w600),
+      ),
+      useMaterial3: true,
+    );
+
+    return MaterialApp(
+      title: 'NEUROTRACE',
+      debugShowCheckedModeBanner: false,
+      theme: theme,
+      home: const GameScreen(),
     );
   }
 }
 
-/// ---------------------- GAME (memory: Simon-like) ----------------------
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
+
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
-  static const int rows = 3;
-  static const int cols = 5;
-  static const int gridSize = rows * cols;
+class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
+  // Grid: 3 x 5
+  static const int rows = 5;
+  static const int cols = 3;
+  static const Duration stepOn = Duration(milliseconds: 480);
+  static const Duration stepGap = Duration(milliseconds: 140);
 
   final Random _rng = Random();
-  List<int> _sequence = [];
-  int _inputIndex = 0;
-  bool _showingSequence = true;
-  Set<int> _lit = {};
-  Set<int> _wrongLit = {};
-  int _round = 0;
-  int _best = 0;
+  final List<int> _sequence = <int>[];
+  final List<int> _player = <int>[];
 
-  bool _screenFlash = false;
+  late List<AnimationController> _glowCtrls;
+  late List<AnimationController> _errorCtrls;
 
-  final ValueNotifier<int> _bgTrigger = ValueNotifier(0);
+  int _level = 1;
+  bool _inputEnabled = false;
+  bool _isPlayingDemo = false;
+  int _score = 0;
 
   @override
   void initState() {
     super.initState();
-    _startNewGame();
+    final total = rows * cols;
+    _glowCtrls = List<AnimationController>.generate(
+      total,
+      (_) => AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 220),
+        lowerBound: 0.0,
+        upperBound: 1.0,
+      ),
+    );
+    _errorCtrls = List<AnimationController>.generate(
+      total,
+      (_) => AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 180),
+        lowerBound: 0.0,
+        upperBound: 1.0,
+      ),
+    );
+    _newGame();
   }
 
-  void _nudgeBackground() {
-    _bgTrigger.value++;
+  @override
+  void dispose() {
+    for (final c in _glowCtrls) {
+      c.dispose();
+    }
+    for (final c in _errorCtrls) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
-  void _startNewGame() {
-    _sequence = [];
-    _round = 0;
-    _nextRound();
-  }
-
-  void _nextRound() {
-    _round += 1;
-    _best = max(_best, _round - 1);
-    _sequence.add(_rng.nextInt(gridSize));
-    _inputIndex = 0;
+  void _newGame() {
+    _sequence.clear();
+    _player.clear();
+    _score = 0;
+    _level = 1;
+    _extendSequence();
     _playSequence();
   }
 
-  Future<void> _playSequence() async {
-    setState(() { _showingSequence = true; _lit.clear(); _wrongLit.clear(); });
-    await Future.delayed(const Duration(milliseconds: 400));
-
-    final onMs = max(220, 560 - _sequence.length * 25);
-    for (final idx in _sequence) {
-      _nudgeBackground();
-      setState(() { _lit = {idx}; _wrongLit.clear(); });
-      await Future.delayed(Duration(milliseconds: onMs));
-      setState(() => _lit.clear());
-      await Future.delayed(const Duration(milliseconds: 180));
-    }
-
-    setState(() => _showingSequence = false);
+  void _extendSequence() {
+    final total = rows * cols;
+    _sequence.add(_rng.nextInt(total));
   }
 
-  void _onTileTap(int index) {
-    if (_showingSequence) return;
-    _nudgeBackground();
+  Future<void> _playSequence() async {
+    setState(() {
+      _inputEnabled = false;
+      _isPlayingDemo = true;
+      _player.clear();
+    });
 
-    final correct = _sequence[_inputIndex] == index;
+    await Future.delayed(const Duration(milliseconds: 420));
 
-    if (correct) {
-      setState(() => _lit = {index});
-      Future.delayed(const Duration(milliseconds: 140),
-          () => mounted ? setState(() => _lit.clear()) : null);
-    } else {
-      _flashWrong(index).then((_) {
-        _best = max(_best, _round - 1);
-        _gameOver();
+    for (final idx in _sequence) {
+      await _flashTile(idx);
+      await Future.delayed(stepGap);
+    }
+
+    setState(() {
+      _inputEnabled = true;
+      _isPlayingDemo = false;
+    });
+  }
+
+  Future<void> _flashTile(int index) async {
+    final c = _glowCtrls[index];
+    try {
+      await c.forward();
+      await Future.delayed(stepOn);
+      await c.reverse();
+    } catch (_) {}
+  }
+
+  Future<void> _flashError(int index) async {
+    final e = _errorCtrls[index];
+    try {
+      await e.forward();
+      await Future.delayed(const Duration(milliseconds: 120));
+      await e.reverse();
+    } catch (_) {}
+  }
+
+  Future<void> _onTapTile(int index) async {
+    if (!_inputEnabled || _isPlayingDemo) return;
+
+    // Give a tiny active flash even during input
+    unawaited(_glowCtrls[index].forward().then((_) => _glowCtrls[index].reverse()));
+
+    _player.add(index);
+
+    final pos = _player.length - 1;
+    if (_sequence[pos] != index) {
+      // Wrong — flash that tile red and replay
+      await _flashError(index);
+      setState(() {
+        _score = max(0, _score - 1);
       });
+      _player.clear();
+      _inputEnabled = false;
+      await Future.delayed(const Duration(milliseconds: 350));
+      await _playSequence();
       return;
     }
 
-    _inputIndex += 1;
-    if (_inputIndex >= _sequence.length) {
-      _nextRound();
+    // Correct so far
+    if (_player.length == _sequence.length) {
+      // Completed level
+      setState(() {
+        _score += 3 + _level; // small reward
+        _level += 1;
+      });
+      _extendSequence();
+      _inputEnabled = false;
+      await Future.delayed(const Duration(milliseconds: 420));
+      await _playSequence();
+    } else {
+      // Partial progress
+      setState(() {
+        _score += 1;
+      });
     }
-  }
-
-  Future<void> _flashWrong(int index) async {
-    setState(() { _wrongLit = {index}; _lit.clear(); _screenFlash = true; });
-    _nudgeBackground();
-    await Future.delayed(const Duration(milliseconds: 140));
-    if (!mounted) return;
-    setState(() { _wrongLit.clear(); _screenFlash = false; });
-  }
-
-  Future<void> _gameOver() async {
-    setState(() => _showingSequence = true);
-    await showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: NeuroTheme.panel,
-        title: const Text('TRACE LOCKED', style: TextStyle(fontWeight: FontWeight.w800)),
-        content: Text('You matched ${max(0, _round - 1)} rounds.\nBest: $_best',
-            style: const TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(c).pop(),
-            child: const Text('AGAIN'),
-          ),
-        ],
-      ),
-    );
-    _startNewGame();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(children: [
-        NeuroBg(trigger: _bgTrigger),
-        Column(
-          children: [
-            const SizedBox(height: 56),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ShaderMask(
-                      shaderCallback: (r) =>
-                          NeuroTheme.brandGradient().createShader(r),
-                      child: const Text('NEUROTRACE',
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white)),
+    final cs = Theme.of(context).colorScheme;
+    final size = MediaQuery.of(context).size;
+
+    return Stack(
+      children: [
+        // Background image + subtle gradient tint
+        DecoratedBox(
+          decoration: BoxDecoration(
+            image: const DecorationImage(
+              image: AssetImage('assets/bg_texture.png'),
+              fit: BoxFit.cover,
+            ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                cs.primary.withOpacity(0.12),
+                cs.secondary.withOpacity(0.12),
+              ],
+            ),
+          ),
+          child: const SizedBox.expand(),
+        ),
+
+        // Content
+        Scaffold(
+          backgroundColor: Colors.black.withOpacity(0.15),
+          body: SafeArea(
+            child: Column(
+              children: [
+                const SizedBox(height: 8),
+                _HeaderBar(score: _score),
+                const SizedBox(height: 8),
+
+                // Level / status
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Row(
+                    children: [
+                      _Pill(
+                        icon: Icons.memory,
+                        label: 'Level',
+                        value: '$_level',
+                      ),
+                      const SizedBox(width: 12),
+                      _Pill(
+                        icon: Icons.grid_3x3,
+                        label: 'Grid',
+                        value: '3×5',
+                      ),
+                      const Spacer(),
+                      _Pill(
+                        icon: _isPlayingDemo ? Icons.visibility : Icons.touch_app,
+                        label: _isPlayingDemo ? 'Watch' : 'Repeat',
+                        value: _isPlayingDemo ? 'Demo' : 'Now',
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Grid stretches in portrait
+                Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 3 / 5, // 3 columns × 5 rows
+                      child: _TileGrid(
+                        rows: rows,
+                        cols: cols,
+                        glowCtrls: _glowCtrls,
+                        errorCtrls: _errorCtrls,
+                        onTap: _onTapTile,
+                        inputEnabled: _inputEnabled && !_isPlayingDemo,
+                      ),
                     ),
                   ),
-                  Text('Best $_best',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _isPlayingDemo ? null : _newGame,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('New Run'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: cs.surface.withOpacity(0.7),
+                            foregroundColor: cs.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Very soft vignette
+        IgnorePointer(
+          ignoring: true,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.15),
+                  Colors.transparent,
+                  Colors.black.withOpacity(0.25),
                 ],
               ),
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                ),
-                itemCount: gridSize,
-                itemBuilder: (context, i) {
-                  final isOn = _lit.contains(i);
-                  final isWrong = _wrongLit.contains(i);
-                  return _Tile(
-                    on: isOn,
-                    wrong: isWrong,
-                    disabled: _showingSequence,
-                    onTap: () => _onTileTap(i),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-        // screen flash on error
-        IgnorePointer(
-          ignoring: true,
-          child: AnimatedOpacity(
-            opacity: _screenFlash ? 0.18 : 0.0,
-            duration: const Duration(milliseconds: 100),
-            child: Container(color: NeuroTheme.error),
           ),
         ),
-      ]),
+      ],
     );
   }
 }
 
-/// ---------------------- TILE ----------------------
-class _Tile extends StatelessWidget {
-  final bool on;
-  final bool wrong;
-  final bool disabled;
-  final VoidCallback onTap;
-
-  const _Tile({
-    required this.on,
-    required this.wrong,
-    required this.disabled,
-    required this.onTap,
-  });
+class _HeaderBar extends StatelessWidget {
+  const _HeaderBar({required this.score});
+  final int score;
 
   @override
   Widget build(BuildContext context) {
-    final color = wrong
-        ? NeuroTheme.error
-        : (on ? NeuroTheme.tileOn : NeuroTheme.tileOff);
+    final cs = Theme.of(context).colorScheme;
 
-    final shadow = wrong
-        ? const [BoxShadow(color: Color(0x66FF4D4D), blurRadius: 26, spreadRadius: 2)]
-        : (on
-            ? const [BoxShadow(color: Color(0x4022E5B2), blurRadius: 24, spreadRadius: 2)]
-            : const []);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 2),
+      child: Row(
+        children: [
+          // Logo + title
+          Row(
+            children: [
+              // Your logo
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  image: const DecorationImage(
+                    image: AssetImage('assets/logo.png'),
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ShaderMask(
+                shaderCallback: (Rect bounds) {
+                  return LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: <Color>[cs.primary, cs.secondary],
+                  ).createShader(bounds);
+                },
+                child: const Text(
+                  'NEUROTRACE',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                    color: Colors.white, // masked
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          // Score pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: cs.surface.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.favorite, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'Souls: $score',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.surface.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: cs.onSurface),
+          const SizedBox(width: 6),
+          Text(
+            '$label ',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: cs.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TileGrid extends StatelessWidget {
+  const _TileGrid({
+    required this.rows,
+    required this.cols,
+    required this.glowCtrls,
+    required this.errorCtrls,
+    required this.onTap,
+    required this.inputEnabled,
+  });
+
+  final int rows;
+  final int cols;
+  final List<AnimationController> glowCtrls;
+  final List<AnimationController> errorCtrls;
+  final void Function(int) onTap;
+  final bool inputEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final spacing = 12.0;
+        final tileW = (constraints.maxWidth - spacing * (cols - 1)) / cols;
+        final tileH = (constraints.maxHeight - spacing * (rows - 1)) / rows;
+        final size = min(tileW, tileH);
+
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List<Widget>.generate(rows, (r) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: r == rows - 1 ? 0 : spacing),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List<Widget>.generate(cols, (c) {
+                  final index = r * cols + c;
+                  return Padding(
+                    padding: EdgeInsets.only(right: c == cols - 1 ? 0 : spacing),
+                    child: _Tile(
+                      size: size,
+                      cs: cs,
+                      glow: glowCtrls[index],
+                      error: errorCtrls[index],
+                      onTap: inputEnabled ? () => onTap(index) : null,
+                    ),
+                  );
+                }),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  const _Tile({
+    required this.size,
+    required this.cs,
+    required this.glow,
+    required this.error,
+    required this.onTap,
+  });
+
+  final double size;
+  final ColorScheme cs;
+  final AnimationController glow;
+  final AnimationController error;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Animation<double> glowA = CurvedAnimation(
+      parent: glow,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    final Animation<double> errA = CurvedAnimation(
+      parent: error,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    final List<BoxShadow> baseShadow = <BoxShadow>[
+      BoxShadow(
+        color: Colors.black.withOpacity(0.35),
+        blurRadius: 12,
+        spreadRadius: 1,
+        offset: const Offset(2, 4),
+      ),
+    ];
 
     return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: shadow,
-        ),
+      onTap: onTap,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([glowA, errA]),
+        builder: (context, _) {
+          final glowStrength = glowA.value;
+          final errStrength = errA.value;
+
+          // Blend colors: teal glow or red flash
+          final Color tileColor = Color.lerp(
+                const Color(0xFF1D2732),
+                cs.primary,
+                glowStrength * 0.8,
+              ) ??
+              const Color(0xFF1D2732);
+
+          final List<BoxShadow> shadow = <BoxShadow>[
+            ...baseShadow,
+            if (glowStrength > 0)
+              BoxShadow(
+                color: cs.primary.withOpacity(0.55 * glowStrength),
+                blurRadius: 24 + 24 * glowStrength,
+                spreadRadius: 1 + 2 * glowStrength,
+              ),
+            if (errStrength > 0)
+              BoxShadow(
+                color: Colors.redAccent.withOpacity(0.7 * errStrength),
+                blurRadius: 28,
+                spreadRadius: 2,
+              ),
+          ];
+
+          return Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: tileColor,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: shadow,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  tileColor.withOpacity(0.95),
+                  tileColor.withOpacity(0.75),
+                ],
+              ),
+            ),
+            child: AnimatedOpacity(
+              opacity: errStrength > 0 ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 80),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.35 * errStrength),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
