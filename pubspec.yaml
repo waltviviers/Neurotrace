@@ -5,7 +5,7 @@ publish_to: "none" # since this is not being published to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.2.0 <4.0.0"
+  sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -26,3 +26,4 @@ flutter:
   assets:
     - assets/logo.png
     - assets/bg_texture.png
+    - assets/bg_circuit.png
