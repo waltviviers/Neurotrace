@@ -112,8 +112,15 @@ class _LogoSceneState extends State<LogoScene>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kLogoOffBlack,
-      body: Center(
-        child: AnimatedBuilder(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset('assets/bg_circuit.png',
+              fit: BoxFit.cover,
+              color: Colors.black.withValues(alpha: 0.55),
+              colorBlendMode: BlendMode.darken),
+          Center(
+            child: AnimatedBuilder(
           animation: _glitchCtrl,
           builder: (context, _) {
             final j = _jitter.value;
@@ -150,6 +157,8 @@ class _LogoSceneState extends State<LogoScene>
             );
           },
         ),
+          ),
+        ],
       ),
     );
   }
@@ -389,8 +398,15 @@ class _GameSceneState extends State<GameScene> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0C0D),
-      body: SafeArea(
-        child: Column(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset('assets/bg_circuit.png',
+              fit: BoxFit.cover,
+              color: Colors.black.withValues(alpha: 0.72),
+              colorBlendMode: BlendMode.darken),
+          SafeArea(
+            child: Column(
           children: [
             _HeaderBar(
               lives: _state.lives,
@@ -451,8 +467,10 @@ class _GameSceneState extends State<GameScene> {
               phase: _phase,
             ),
             const SizedBox(height: 12),
-          ],
-        ),
+            ],
+          ),
+          ),
+        ],
       ),
     );
   }
