@@ -492,6 +492,43 @@ class _GameSceneState extends State<GameScene> {
 /// =============================
 /// UI COMPONENTS
 /// =============================
+
+const _kGlyphs = [
+  'Ω', 'Σ', 'Φ', 'Δ', 'Λ', 'Ψ', 'Θ', 'Π',
+  '0x', 'FF', '4A', 'C3', 'B7', 'E9', '1F', '8D',
+  '#!', '@0', '%F', '&A', '??', '!!', '/*', '//',
+];
+
+class _PixelHeartPainter extends CustomPainter {
+  final Color color;
+  const _PixelHeartPainter({required this.color});
+
+  static const _grid = [
+    [0, 1, 1, 0, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 0, 0],
+    [0, 0, 0, 1, 0, 0, 0],
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final pw = size.width / _grid[0].length;
+    final ph = size.height / _grid.length;
+    for (int r = 0; r < _grid.length; r++) {
+      for (int c = 0; c < _grid[r].length; c++) {
+        if (_grid[r][c] == 1) {
+          canvas.drawRect(Rect.fromLTWH(c * pw, r * ph, pw, ph), paint);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelHeartPainter old) => old.color != color;
+}
 class _HeaderBar extends StatelessWidget {
   final int lives;
   final int score;
@@ -518,9 +555,15 @@ class _HeaderBar extends StatelessWidget {
           Row(
             children: List.generate(
               max(0, lives),
-              (_) => const Padding(
-                padding: EdgeInsets.only(right: 4.0),
-                child: Icon(Icons.favorite, size: 18, color: Colors.redAccent),
+              (_) => Padding(
+                padding: const EdgeInsets.only(right: 6.0),
+                child: SizedBox(
+                  width: 16,
+                  height: 14,
+                  child: CustomPaint(
+                    painter: _PixelHeartPainter(color: Colors.yellow),
+                  ),
+                ),
               ),
             ),
           ),
@@ -576,6 +619,11 @@ class _TileButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    final glyph = trapFlash ? 'ERR' : _kGlyphs[index % _kGlyphs.length];
+    final glyphColor = flashing
+        ? Colors.white
+        : Colors.cyan.withValues(alpha: 0.5);
+
     final base = Container(
       decoration: BoxDecoration(
         color: flashing
@@ -598,6 +646,17 @@ class _TileButton extends StatelessWidget {
             ),
         ],
       ),
+      child: Center(
+        child: AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 160),
+          style: TextStyle(
+            fontSize: size * 0.32,
+            fontWeight: FontWeight.bold,
+            color: glyphColor,
+          ),
+          child: Text(glyph),
+        ),
+      ),
     );
 
     return SizedBox(
@@ -608,24 +667,7 @@ class _TileButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: disabled ? null : onPressed,
-          child: Stack(
-            children: [
-              Positioned.fill(child: base),
-              Positioned.fill(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 160),
-                  opacity: flashing ? 1.0 : 0.0,
-                  child: Center(
-                    child: Icon(
-                      trapFlash ? Icons.block : Icons.circle,
-                      size: size * 0.28,
-                      color: Colors.white.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          child: base,
         ),
       ),
     );
