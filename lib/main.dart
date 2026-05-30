@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -524,6 +525,9 @@ class _GameSceneState extends State<GameScene> {
 /// UI COMPONENTS
 /// =============================
 
+TextStyle _pixel(double size, {Color? color, FontWeight weight = FontWeight.normal}) =>
+    GoogleFonts.pressStart2p(fontSize: size, color: color, fontWeight: weight);
+
 const _kGlyphs = [
   'Ω', 'Σ', 'Φ', 'Δ', 'Λ', 'Ψ', 'Θ', 'Π',
   '0x', 'FF', '4A', 'C3', 'B7', 'E9', '1F', '8D',
@@ -582,55 +586,56 @@ class _HeaderBar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: List.generate(
-              max(0, lives),
-              (_) => Padding(
-                padding: const EdgeInsets.only(right: 6.0),
-                child: SizedBox(
-                  width: 16,
-                  height: 14,
-                  child: CustomPaint(
-                    painter: _PixelHeartPainter(color: Colors.yellow),
+          // Pixel hearts
+          Column(
+            children: [
+              Row(
+                children: List.generate(
+                  max(0, lives),
+                  (_) => Padding(
+                    padding: const EdgeInsets.only(right: 6.0),
+                    child: SizedBox(
+                      width: 16,
+                      height: 14,
+                      child: CustomPaint(
+                        painter: _PixelHeartPainter(color: Colors.yellow),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
           const Spacer(),
+          // Right-side stats block
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: 0.3)),
-            ),
-            child: Text('Rows: $rows | Cleared: $roundsCleared',
-                style: const TextStyle(fontSize: 12)),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: cs.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(6),
               border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('Score: $score',
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
-                if (highScore > 0)
-                  Text('Best: $highScore',
-                      style: const TextStyle(
-                          fontSize: 10, color: Colors.amber)),
+                Text('SERVERS: $rows', style: _pixel(7, color: Colors.cyan)),
+                const SizedBox(height: 4),
+                Text('MINDS RELEASED: $roundsCleared',
+                    style: _pixel(7, color: Colors.cyan)),
+                const SizedBox(height: 6),
+                Text('MOST SOULS SET FREE:', style: _pixel(6, color: cs.primary)),
+                const SizedBox(height: 2),
+                Text('$score', style: _pixel(11, color: Colors.white)),
+                if (highScore > 0) ...[
+                  const SizedBox(height: 3),
+                  Text('BEST: $highScore',
+                      style: _pixel(7, color: Colors.amber)),
+                ],
               ],
             ),
           ),
@@ -758,7 +763,7 @@ class _BottomBar extends StatelessWidget {
                   : null,
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(label),
+                child: Text(label, style: _pixel(9)),
               ),
             ),
           ),
