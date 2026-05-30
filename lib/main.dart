@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -204,6 +205,7 @@ class _GameState {
   int score = 0;
   int rows = 1;
   int roundsCleared = 0;
+  int replayTokens = 1;
 
   final List<int> sequence = [];
   int? trapStepIndex;
@@ -215,6 +217,7 @@ class _GameState {
     sequence.clear();
     trapStepIndex = null;
     inputProgress = 0;
+    // replayTokens intentionally not reset — they accumulate across rounds
   }
 }
 
@@ -226,10 +229,30 @@ class _GameSceneState extends State<GameScene> {
   int? _flashingIndex;
   bool _isTrapFlash = false;
 
+  int _highScore = 0;
+  SharedPreferences? _prefs;
+
   @override
   void initState() {
     super.initState();
+    _loadHighScore();
     _startNewRound(initial: true);
+  }
+
+  Future<void> _loadHighScore() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _prefs = prefs;
+      _highScore = prefs.getInt('highScore') ?? 0;
+    });
+  }
+
+  void _updateHighScore() {
+    if (_state.score > _highScore) {
+      setState(() => _highScore = _state.score);
+      _prefs?.setInt('highScore', _state.score);
+    }
   }
 
   int get totalTiles => _state.rows * kCols;
@@ -330,6 +353,7 @@ class _GameSceneState extends State<GameScene> {
 
     if (_state.lives <= 0) {
       setState(() => _phase = Phase.gameOver);
+      _updateHighScore();
       return;
     }
 
@@ -355,7 +379,9 @@ class _GameSceneState extends State<GameScene> {
       _phase = Phase.roundEnd;
       _state.roundsCleared += 1;
       _state.score += 100 + (_state.trapStepIndex != null ? 35 : 0);
+      _state.replayTokens += 1;
     });
+    _updateHighScore();
 
     await Future.delayed(kBetweenRoundsPause);
 
@@ -381,6 +407,7 @@ class _GameSceneState extends State<GameScene> {
       _state.rows = 1;
       _state.roundsCleared = 0;
       _state.gaveSecondRowLife = false;
+      _state.replayTokens = 1;
       _state.resetForNewRound();
       _flashingIndex = null;
       _isTrapFlash = false;
@@ -389,6 +416,8 @@ class _GameSceneState extends State<GameScene> {
   }
 
   void _replaySequence() {
+    if (_state.replayTokens <= 0) return;
+    setState(() => _state.replayTokens--);
     _revealSequence().then((_) {
       if (mounted) setState(() => _phase = Phase.input);
     });
@@ -414,6 +443,7 @@ class _GameSceneState extends State<GameScene> {
               rows: _state.rows,
               roundsCleared: _state.roundsCleared,
               phase: _phase,
+              highScore: _highScore,
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -465,6 +495,7 @@ class _GameSceneState extends State<GameScene> {
               onRestart: _restartGame,
               onReplaySequence: _replaySequence,
               phase: _phase,
+              replayTokens: _state.replayTokens,
             ),
             const SizedBox(height: 12),
             ],
@@ -535,6 +566,7 @@ class _HeaderBar extends StatelessWidget {
   final int rows;
   final int roundsCleared;
   final Phase phase;
+  final int highScore;
 
   const _HeaderBar({
     required this.lives,
@@ -542,6 +574,7 @@ class _HeaderBar extends StatelessWidget {
     required this.rows,
     required this.roundsCleared,
     required this.phase,
+    required this.highScore,
   });
 
   @override
@@ -585,12 +618,21 @@ class _HeaderBar extends StatelessWidget {
             decoration: BoxDecoration(
               color: cs.primary.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
-              border:
-                  Border.all(color: cs.primary.withValues(alpha: 0.3)),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
             ),
-            child: Text('Score: $score',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('Score: $score',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600)),
+                if (highScore > 0)
+                  Text('Best: $highScore',
+                      style: const TextStyle(
+                          fontSize: 10, color: Colors.amber)),
+              ],
+            ),
           ),
         ],
       ),
@@ -678,17 +720,24 @@ class _BottomBar extends StatelessWidget {
   final VoidCallback onRestart;
   final VoidCallback onReplaySequence;
   final Phase phase;
+  final int replayTokens;
 
   const _BottomBar({
     required this.onRestart,
     required this.onReplaySequence,
     required this.phase,
+    required this.replayTokens,
   });
 
   @override
   Widget build(BuildContext context) {
     final isOver = phase == Phase.gameOver;
-    final label = isOver ? 'Restart' : 'Replay Sequence';
+    final canReplay = replayTokens > 0;
+    final label = isOver
+        ? 'Restart'
+        : canReplay
+            ? 'Replay  [$replayTokens]'
+            : 'No Replays Left';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -697,14 +746,16 @@ class _BottomBar extends StatelessWidget {
           Expanded(
             child: ElevatedButton.icon(
               icon: Icon(isOver ? Icons.refresh : Icons.play_arrow),
-              onPressed: () {
-                if (isOver) {
-                  onRestart();
-                } else {
-                  HapticFeedback.selectionClick();
-                  onReplaySequence();
-                }
-              },
+              onPressed: (isOver || canReplay)
+                  ? () {
+                      if (isOver) {
+                        onRestart();
+                      } else {
+                        HapticFeedback.selectionClick();
+                        onReplaySequence();
+                      }
+                    }
+                  : null,
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(label),
