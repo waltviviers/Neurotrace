@@ -645,7 +645,7 @@ class _HeaderBar extends StatelessWidget {
   }
 }
 
-class _TileButton extends StatelessWidget {
+class _TileButton extends StatefulWidget {
   final int index;
   final double size;
   final bool disabled;
@@ -663,58 +663,103 @@ class _TileButton extends StatelessWidget {
   });
 
   @override
+  State<_TileButton> createState() => _TileButtonState();
+}
+
+class _TileButtonState extends State<_TileButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _redFade;
+
+  @override
+  void initState() {
+    super.initState();
+    _redFade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_TileButton old) {
+    super.didUpdateWidget(old);
+    if (widget.trapFlash && !old.trapFlash) {
+      _redFade.forward(from: 0.0);
+    } else if (!widget.trapFlash && old.trapFlash) {
+      _redFade.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _redFade.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-
-    final glyph = trapFlash ? 'ERR' : _kGlyphs[index % _kGlyphs.length];
-    final glyphColor = flashing
-        ? Colors.white
-        : Colors.cyan.withValues(alpha: 0.5);
-
-    final base = Container(
-      decoration: BoxDecoration(
-        color: flashing
-            ? (trapFlash ? Colors.redAccent : cs.primary)
-            : const Color(0xFF121416),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: trapFlash
-              ? Colors.redAccent.withValues(alpha: 0.8)
-              : cs.primary.withValues(alpha: flashing ? 0.9 : 0.25),
-          width: flashing ? 2 : 1,
-        ),
-        boxShadow: [
-          if (flashing)
-            BoxShadow(
-              color: (trapFlash ? Colors.redAccent : cs.primary)
-                  .withValues(alpha: 0.55),
-              blurRadius: 14,
-              spreadRadius: 2,
-            ),
-        ],
-      ),
-      child: Center(
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 160),
-          style: TextStyle(
-            fontSize: size * 0.32,
-            fontWeight: FontWeight.bold,
-            color: glyphColor,
-          ),
-          child: Text(glyph),
-        ),
-      ),
-    );
+    final glyph = widget.trapFlash
+        ? '☠'   // ☠ skull
+        : _kGlyphs[widget.index % _kGlyphs.length];
 
     return SizedBox(
-      width: size,
-      height: size,
+      width: widget.size,
+      height: widget.size,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: disabled ? null : onPressed,
-          child: base,
+          onTap: widget.disabled ? null : widget.onPressed,
+          child: AnimatedBuilder(
+            animation: _redFade,
+            builder: (context, _) {
+              // Red flashes in instantly, then fades to primary blue over 240ms
+              final t = _redFade.value;
+              final flashColor = widget.flashing
+                  ? Color.lerp(Colors.redAccent, cs.primary, t)!
+                  : const Color(0xFF121416);
+              final borderColor = widget.flashing
+                  ? Color.lerp(Colors.redAccent, cs.primary, t)!
+                      .withValues(alpha: 0.85)
+                  : cs.primary.withValues(alpha: 0.25);
+              final glowColor = widget.flashing
+                  ? Color.lerp(Colors.redAccent, cs.primary, t)!
+                      .withValues(alpha: 0.6)
+                  : Colors.transparent;
+
+              return Container(
+                decoration: BoxDecoration(
+                  color: flashColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: borderColor,
+                    width: widget.flashing ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    if (widget.flashing)
+                      BoxShadow(
+                        color: glowColor,
+                        blurRadius: 14,
+                        spreadRadius: 2,
+                      ),
+                  ],
+                ),
+                child: Center(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 160),
+                    style: TextStyle(
+                      fontSize: widget.size * 0.34,
+                      fontWeight: FontWeight.bold,
+                      color: widget.flashing
+                          ? Colors.white
+                          : Colors.cyan.withValues(alpha: 0.5),
+                    ),
+                    child: Text(glyph),
+                  ),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
