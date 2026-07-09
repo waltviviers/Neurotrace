@@ -609,6 +609,16 @@ class _GameSceneState extends State<GameScene> {
     _startNewRound(initial: true);
   }
 
+  Future<void> _openPlayStoreRating() async {
+    try {
+      const url = 'https://play.google.com/store/apps/details?id=com.waltviviers.neurotracer';
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        _prefs?.setBool('hasRated', true);
+      }
+    } catch (_) {}
+  }
+
   void _updateHighScore() {
     if (_state.score > _highScore) {
       setState(() => _highScore = _state.score);
@@ -867,6 +877,7 @@ class _GameSceneState extends State<GameScene> {
               onRestart: _restartGame,
               onReplaySequence: _replaySequence,
               onHighScoreMode: _activateHighScoreMode,
+              onRate: _openPlayStoreRating,
               phase: _phase,
               replayTokens: _state.replayTokens,
               score: _state.score,
@@ -1266,6 +1277,7 @@ class _BottomBar extends StatelessWidget {
   final VoidCallback onRestart;
   final VoidCallback onReplaySequence;
   final VoidCallback onHighScoreMode;
+  final VoidCallback onRate;
   final Phase phase;
   final int replayTokens;
   final int score;
@@ -1274,6 +1286,7 @@ class _BottomBar extends StatelessWidget {
     required this.onRestart,
     required this.onReplaySequence,
     required this.onHighScoreMode,
+    required this.onRate,
     required this.phase,
     required this.replayTokens,
     required this.score,
@@ -1314,6 +1327,22 @@ class _BottomBar extends StatelessWidget {
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text('HIGH SCORE MODE', style: _pixel(9, color: Colors.amber)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.star_rate),
+                onPressed: onRate,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.cyan.withValues(alpha: 0.12),
+                  side: const BorderSide(color: Colors.cyan),
+                ),
+                label: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text('RATE YOUR APP', style: _pixel(9, color: Colors.cyan)),
                 ),
               ),
             ),
@@ -1481,6 +1510,23 @@ class _TutorialOverlayState extends State<_TutorialOverlay> {
       body: 'Earn a token each round.\nWatch the sequence again\nor save 13 to continue.',
       icon: Icons.bolt,
       iconColor: Colors.amber,
+    ),
+    _TutPage(
+      title: 'LEVEL PROGRESSION',
+      body: 'Clear 27 rounds to win.\nEach round gets harder\nwith more tiles.',
+      icon: Icons.stairs,
+    ),
+    _TutPage(
+      title: 'HIGH SCORE MODE',
+      body: 'After winning, unlock\nEndless mode to climb\nthe leaderboard.',
+      icon: Icons.trending_up,
+      iconColor: Colors.amber,
+    ),
+    _TutPage(
+      title: 'PRO TIPS',
+      body: 'Tap quickly. Use bonus\ntiles wisely. Remember:\neach life matters.',
+      icon: Icons.lightbulb,
+      iconColor: Colors.cyan,
     ),
   ];
 
