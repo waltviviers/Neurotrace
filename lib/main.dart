@@ -7,6 +7,10 @@ import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'firebase_options.dart';
+import 'leaderboard_service.dart';
 
 // ---------------------------------------------------------------------------
 // Sound effects
@@ -29,9 +33,16 @@ class _Sfx {
   static void bonus()   => play('sounds/bonus_tap.wav');
 }
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (_) {
+    // Firebase init failed - app continues without leaderboard
+  }
   runApp(const NeuroTraceApp());
 }
 
@@ -578,6 +589,7 @@ class _GameSceneState extends State<GameScene> {
   bool _highScoreMode = false;
   bool _highScoreModeUnlocked = false;
   StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
+  late LeaderboardService _leaderboardService;
 
   @override
   void initState() {
@@ -602,6 +614,8 @@ class _GameSceneState extends State<GameScene> {
       _Sfx.muted = _muted;
       _highScoreModeUnlocked = prefs.getBool('highScoreModeUnlocked') ?? false;
     });
+    _leaderboardService = LeaderboardService();
+    await _leaderboardService.init(prefs);
     _initializeIAP();
     if (!_showTutorial) _startNewRound(initial: true);
   }
@@ -682,6 +696,9 @@ class _GameSceneState extends State<GameScene> {
     if (_state.score > _highScore) {
       setState(() => _highScore = _state.score);
       _prefs?.setInt('highScore', _state.score);
+      if (_highScoreMode) {
+        _leaderboardService.submitScore(_state.score);
+      }
     }
   }
 
@@ -862,6 +879,14 @@ class _GameSceneState extends State<GameScene> {
     );
   }
 
+  void _showLeaderboard() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => LeaderboardScreen(leaderboardService: _leaderboardService),
+      ),
+    );
+  }
+
   void _restartGame() {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -919,6 +944,7 @@ class _GameSceneState extends State<GameScene> {
               muted: _muted,
               onMuteToggle: _toggleMute,
               onShowTutorial: () => setState(() => _showTutorial = true),
+              onShowLeaderboard: _showLeaderboard,
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -1165,6 +1191,7 @@ class _HeaderBar extends StatelessWidget {
   final bool muted;
   final VoidCallback onMuteToggle;
   final VoidCallback onShowTutorial;
+  final VoidCallback onShowLeaderboard;
 
   const _HeaderBar({
     required this.lives,
@@ -1176,6 +1203,7 @@ class _HeaderBar extends StatelessWidget {
     required this.muted,
     required this.onMuteToggle,
     required this.onShowTutorial,
+    required this.onShowLeaderboard,
   });
 
   @override
@@ -1222,6 +1250,15 @@ class _HeaderBar extends StatelessWidget {
                     onTap: onShowTutorial,
                     child: Icon(
                       Icons.help_outline,
+                      color: Colors.cyan.withValues(alpha: 0.55),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: onShowLeaderboard,
+                    child: Icon(
+                      Icons.leaderboard,
                       color: Colors.cyan.withValues(alpha: 0.55),
                       size: 18,
                     ),
@@ -1717,6 +1754,211 @@ class _CreatorTag extends StatelessWidget {
         child: Text(
           'created by @waltviviers',
           style: _pixel(6, color: Colors.white.withValues(alpha: 0.30)),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LEADERBOARD SCREEN
+// ---------------------------------------------------------------------------
+
+class LeaderboardScreen extends StatefulWidget {
+  final LeaderboardService leaderboardService;
+  const LeaderboardScreen({required this.leaderboardService});
+
+  @override
+  State<LeaderboardScreen> createState() => _LeaderboardScreenState();
+}
+
+class _LeaderboardScreenState extends State<LeaderboardScreen> {
+  late Future<List<LeaderboardEntry>> _leaderboardFuture;
+  TextEditingController? _nameController;
+  bool _isEditingName = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshLeaderboard();
+  }
+
+  void _refreshLeaderboard() {
+    setState(() {
+      _leaderboardFuture = widget.leaderboardService.fetchTopScores();
+    });
+  }
+
+  void _editPlayerName() {
+    _nameController = TextEditingController(text: widget.leaderboardService.playerName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0C0D),
+        title: Text('PLAYER NAME', style: _pixel(12, color: Colors.cyan)),
+        content: TextField(
+          controller: _nameController,
+          style: _pixel(10, color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter your name',
+            hintStyle: _pixel(9, color: Colors.white.withValues(alpha: 0.5)),
+            border: OutlineInputBorder(
+              borderSide: const BorderSide(color: Colors.cyan),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('CANCEL', style: _pixel(9, color: Colors.cyan)),
+          ),
+          TextButton(
+            onPressed: () {
+              widget.leaderboardService.setPlayerName(_nameController!.text);
+              Navigator.pop(ctx);
+              _refreshLeaderboard();
+            },
+            child: Text('SAVE', style: _pixel(9, color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0C0D),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0A0C0D),
+        elevation: 0,
+        title: Text('LEADERBOARD', style: _pixel(14, color: Colors.cyan)),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.cyan),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('YOU ARE PLAYING AS:', style: _pixel(8, color: Colors.white.withValues(alpha: 0.7))),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        widget.leaderboardService.playerName,
+                        style: _pixel(11, color: Colors.cyan),
+                      ),
+                      GestureDetector(
+                        onTap: _editPlayerName,
+                        child: Icon(Icons.edit, color: Colors.amber, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _refreshLeaderboard,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.cyan.withValues(alpha: 0.12),
+                        side: const BorderSide(color: Colors.cyan),
+                      ),
+                      label: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Text('REFRESH', style: _pixel(9, color: Colors.cyan)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<LeaderboardEntry>>(
+                future: _leaderboardFuture,
+                builder: (ctx, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(
+                      child: Text('LOADING...', style: _pixel(10, color: Colors.cyan)),
+                    );
+                  }
+
+                  if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+                    return Center(
+                      child: Text(
+                        'NO SCORES YET',
+                        style: _pixel(10, color: Colors.amber),
+                      ),
+                    );
+                  }
+
+                  final scores = snapshot.data!;
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    itemCount: scores.length,
+                    itemBuilder: (ctx, index) {
+                      final entry = scores[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: entry.isCurrentPlayer
+                                ? Colors.amber.withValues(alpha: 0.15)
+                                : Colors.white.withValues(alpha: 0.05),
+                            border: Border.all(
+                              color: entry.isCurrentPlayer ? Colors.amber : Colors.cyan.withValues(alpha: 0.3),
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 30,
+                                    child: Text(
+                                      '#${entry.rank}',
+                                      style: _pixel(9, color: Colors.cyan),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Flexible(
+                                    child: Text(
+                                      entry.playerName,
+                                      style: _pixel(
+                                        9,
+                                        color: entry.isCurrentPlayer ? Colors.amber : Colors.white,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                entry.score.toString(),
+                                style: _pixel(10, color: Colors.green.withValues(alpha: 0.8)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
