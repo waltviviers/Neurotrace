@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 // ---------------------------------------------------------------------------
 // Sound effects
@@ -575,11 +576,19 @@ class _GameSceneState extends State<GameScene> {
   bool _muted = false;
   bool _showGameOverUi = false;
   bool _highScoreMode = false;
+  bool _highScoreModeUnlocked = false;
+  StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadPrefsAndStart();
+  }
+
+  @override
+  void dispose() {
+    _iapSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadPrefsAndStart() async {
@@ -591,10 +600,60 @@ class _GameSceneState extends State<GameScene> {
       _showTutorial = !(prefs.getBool('tutorialSeen') ?? false);
       _muted = prefs.getBool('muted') ?? false;
       _Sfx.muted = _muted;
+      _highScoreModeUnlocked = prefs.getBool('highScoreModeUnlocked') ?? false;
     });
-    // Only start the first round after the tutorial is dismissed (if shown).
-    // Returning players (tutorialSeen=true) start immediately.
+    _initializeIAP();
     if (!_showTutorial) _startNewRound(initial: true);
+  }
+
+  Future<void> _initializeIAP() async {
+    _iapSubscription = InAppPurchase.instance.purchaseStream.listen(
+      _handlePurchaseUpdate,
+      onError: (_) {},
+    );
+    await _restorePreviousPurchases();
+  }
+
+  Future<void> _restorePreviousPurchases() async {
+    try {
+      await InAppPurchase.instance.restorePurchases();
+    } catch (_) {}
+  }
+
+  void _handlePurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
+    for (final purchase in purchaseDetailsList) {
+      if (purchase.productID == 'high_score_mode_unlock') {
+        if (purchase.status == PurchaseStatus.purchased) {
+          if (!_highScoreModeUnlocked) {
+            setState(() => _highScoreModeUnlocked = true);
+            _prefs?.setBool('highScoreModeUnlocked', true);
+          }
+          if (purchase.pendingCompleteTransaction) {
+            InAppPurchase.instance.completePurchase(purchase);
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _purchaseHighScoreMode() async {
+    try {
+      final productDetails = await InAppPurchase.instance.queryProductDetails(
+        {'high_score_mode_unlock'},
+      );
+      if (productDetails.productDetails.isNotEmpty) {
+        final product = productDetails.productDetails.first;
+        await InAppPurchase.instance.buyNonConsumable(
+          purchaseParam: PurchaseParam(productDetails: product),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to purchase: $e')),
+        );
+      }
+    }
   }
 
   void _toggleMute() {
@@ -768,8 +827,39 @@ class _GameSceneState extends State<GameScene> {
 
   void _activateHighScoreMode() {
     if (!mounted) return;
+    if (!_highScoreModeUnlocked) {
+      _showPurchaseDialog();
+      return;
+    }
     setState(() => _highScoreMode = true);
     _startNewRound();
+  }
+
+  void _showPurchaseDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0C0D),
+        title: Text('UNLOCK HIGH SCORE MODE', style: _pixel(12, color: Colors.cyan)),
+        content: Text(
+          'Play endless rounds and compete for the highest score.\n\n\$0.99',
+          style: _pixel(9, color: Colors.white.withValues(alpha: 0.85)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('CANCEL', style: _pixel(9, color: Colors.cyan)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _purchaseHighScoreMode();
+            },
+            child: Text('BUY', style: _pixel(9, color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _restartGame() {
@@ -878,6 +968,7 @@ class _GameSceneState extends State<GameScene> {
               onReplaySequence: _replaySequence,
               onHighScoreMode: _activateHighScoreMode,
               onRate: _openPlayStoreRating,
+              highScoreModeUnlocked: _highScoreModeUnlocked,
               phase: _phase,
               replayTokens: _state.replayTokens,
               score: _state.score,
@@ -1278,6 +1369,7 @@ class _BottomBar extends StatelessWidget {
   final VoidCallback onReplaySequence;
   final VoidCallback onHighScoreMode;
   final VoidCallback onRate;
+  final bool highScoreModeUnlocked;
   final Phase phase;
   final int replayTokens;
   final int score;
@@ -1287,6 +1379,7 @@ class _BottomBar extends StatelessWidget {
     required this.onReplaySequence,
     required this.onHighScoreMode,
     required this.onRate,
+    required this.highScoreModeUnlocked,
     required this.phase,
     required this.replayTokens,
     required this.score,
@@ -1318,7 +1411,7 @@ class _BottomBar extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                icon: const Icon(Icons.trending_up),
+                icon: const Icon(highScoreModeUnlocked ? Icons.trending_up : Icons.lock),
                 onPressed: onHighScoreMode,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.amber.withValues(alpha: 0.12),
@@ -1326,7 +1419,10 @@ class _BottomBar extends StatelessWidget {
                 ),
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('HIGH SCORE MODE', style: _pixel(9, color: Colors.amber)),
+                  child: Text(
+                    highScoreModeUnlocked ? 'HIGH SCORE MODE' : 'UNLOCK - \$0.99',
+                    style: _pixel(9, color: Colors.amber),
+                  ),
                 ),
               ),
             ),
