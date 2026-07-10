@@ -1235,35 +1235,39 @@ class _HeaderBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              Row(
-                children: [
-                  GestureDetector(
-                    onTap: onMuteToggle,
-                    child: Icon(
-                      muted ? Icons.volume_off : Icons.volume_up,
-                      color: Colors.cyan.withValues(alpha: 0.55),
-                      size: 18,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: onMuteToggle,
+                      child: Icon(
+                        muted ? Icons.volume_off : Icons.volume_up,
+                        color: Colors.cyan.withValues(alpha: 0.55),
+                        size: 18,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: onShowTutorial,
-                    child: Icon(
-                      Icons.help_outline,
-                      color: Colors.cyan.withValues(alpha: 0.55),
-                      size: 18,
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: onShowTutorial,
+                      child: Icon(
+                        Icons.help_outline,
+                        color: Colors.cyan.withValues(alpha: 0.55),
+                        size: 18,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: onShowLeaderboard,
-                    child: Icon(
-                      Icons.leaderboard,
-                      color: Colors.cyan.withValues(alpha: 0.55),
-                      size: 18,
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: onShowLeaderboard,
+                      child: Icon(
+                        Icons.leaderboard,
+                        color: Colors.cyan.withValues(alpha: 0.55),
+                        size: 18,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -1457,8 +1461,8 @@ class _BottomBar extends StatelessWidget {
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
-                    highScoreModeUnlocked ? 'HIGH SCORE MODE' : 'UNLOCK - \$0.99',
-                    style: _pixel(9, color: Colors.amber),
+                    highScoreModeUnlocked ? 'HIGH SCORE MODE' : 'BUY \$0.99',
+                    style: _pixel(10, color: Colors.amber),
                   ),
                 ),
               ),
@@ -1475,7 +1479,7 @@ class _BottomBar extends StatelessWidget {
                 ),
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('RATE YOUR APP', style: _pixel(9, color: Colors.cyan)),
+                  child: Text('RATE APP', style: _pixel(10, color: Colors.cyan)),
                 ),
               ),
             ),
